@@ -773,6 +773,70 @@ async function showReadout(p, layer) {
   }
 }
 
+// ---------- 左侧面板宽度（拖动分隔条） ----------
+
+const panelEl = document.getElementById('panel');
+const dividerEl = document.getElementById('divider');
+const PANEL_MIN = 260;
+const PANEL_DEFAULT = 380;
+const PANEL_MAX = 760;
+const PANEL_STORAGE = 'mapstitch.panelWidth';
+
+function panelMaxWidth() {
+  return Math.max(PANEL_MIN, Math.min(PANEL_MAX, window.innerWidth - 280));
+}
+
+function applyPanelWidth(width, persist = false) {
+  const w = Math.round(Math.max(PANEL_MIN, Math.min(panelMaxWidth(), Number(width) || PANEL_DEFAULT)));
+  document.documentElement.style.setProperty('--panel-w', `${w}px`);
+  if (persist) {
+    try { localStorage.setItem(PANEL_STORAGE, String(w)); } catch { /* ignore */ }
+  }
+  return w;
+}
+
+try {
+  const saved = Number(localStorage.getItem(PANEL_STORAGE));
+  if (Number.isFinite(saved) && saved > 0) applyPanelWidth(saved);
+} catch { /* ignore */ }
+
+let panelDrag = null;
+dividerEl.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  panelDrag = { startX: e.clientX, startW: panelEl.getBoundingClientRect().width };
+  dividerEl.classList.add('dragging');
+  document.body.classList.add('resizing');
+  dividerEl.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+dividerEl.addEventListener('pointermove', (e) => {
+  if (!panelDrag) return;
+  applyPanelWidth(panelDrag.startW + e.clientX - panelDrag.startX);
+  resize();
+});
+const endPanelDrag = (e) => {
+  if (!panelDrag) return;
+  panelDrag = null;
+  dividerEl.classList.remove('dragging');
+  document.body.classList.remove('resizing');
+  if (dividerEl.hasPointerCapture(e.pointerId)) dividerEl.releasePointerCapture(e.pointerId);
+  applyPanelWidth(panelEl.getBoundingClientRect().width, true);
+};
+dividerEl.addEventListener('pointerup', endPanelDrag);
+dividerEl.addEventListener('pointercancel', endPanelDrag);
+dividerEl.addEventListener('dblclick', () => { applyPanelWidth(PANEL_DEFAULT, true); resize(); });
+dividerEl.addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  e.preventDefault();
+  const delta = e.key === 'ArrowLeft' ? -20 : 20;
+  applyPanelWidth(panelEl.getBoundingClientRect().width + delta, true);
+  resize();
+});
+window.addEventListener('resize', () => {
+  applyPanelWidth(panelEl.getBoundingClientRect().width);
+  resize();
+});
+
 // ---------- 主循环 ----------
 
 function resize() {
@@ -782,7 +846,6 @@ function resize() {
   renderer.setSize(w, h);
   labelRenderer.setSize(w, h);
 }
-window.addEventListener('resize', resize);
 
 let last = performance.now();
 let lastFrame = performance.now();
