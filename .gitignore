@@ -1,0 +1,11 @@
+# 依赖
+node_modules/
+
+# 构建产物与 VPK 解包缓存（体积大、可由 build --all / --addon 重新生成）
+out/
+
+# 临时文件
+*.log
+*.tmp
+.DS_Store
+Thumbs.db

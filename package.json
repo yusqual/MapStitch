@@ -1,0 +1,23 @@
+{
+  "name": "mapstitch",
+  "version": "0.1.0",
+  "private": true,
+  "description": "L4D2 cross-chapter map stitching visualizer",
+  "type": "module",
+  "bin": {
+    "mapstitch": "./src/cli.js"
+  },
+  "scripts": {
+    "build": "node src/cli.js build --all",
+    "serve": "node src/cli.js serve",
+    "pairs": "node src/cli.js pairs",
+    "check": "node src/cli.js check",
+    "validate:disp": "node tools/check_disp.js"
+  },
+  "dependencies": {
+    "three": "^0.180.0"
+  },
+  "optionalDependencies": {
+    "lzma-native": "^8.0.6"
+  }
+}

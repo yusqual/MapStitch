@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MapStitch — L4D2 跨章节地图拼接</title>
+<link rel="stylesheet" href="/style.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "/node_modules/three/build/three.module.js",
+    "three/addons/": "/node_modules/three/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <aside id="panel">
+    <header>
+      <h1>MapStitch</h1>
+      <p class="sub">L4D2 跨章节地图拼接</p>
+    </header>
+
+    <section id="addonSection">
+      <h2>附加地图 / VPK</h2>
+      <div id="addonList" class="addonlist"><span class="info">扫描 addons…</span></div>
+      <label class="chk"><input type="checkbox" id="addonOnlyMaps" checked /> 只显示含地图的 addon</label>
+      <div class="btnrow">
+        <button id="addonBuildBtn" disabled>解析并加入</button>
+        <button id="addonRefreshBtn">重新扫描</button>
+      </div>
+      <div class="info" id="addonStatus"></div>
+      <pre id="addonLog" class="joblog hidden"></pre>
+    </section>
+
+    <section>
+      <label class="field">
+        <span>章节过渡</span>
+        <select id="pairSelect"><option>加载中…</option></select>
+      </label>
+      <div id="pairInfo" class="info"></div>
+    </section>
+
+    <section id="mapA" class="mapbox a">
+      <h2><span class="dot" style="background:#8fc7ff"></span><span id="nameA">上一章</span></h2>
+      <label class="field row">
+        <span>不透明度</span>
+        <input type="range" id="opacityA" min="0" max="1" step="0.01" value="0.9" />
+      </label>
+      <label class="chk"><input type="checkbox" id="wireA" /> 线框</label>
+    </section>
+
+    <section id="mapB" class="mapbox b">
+      <h2><span class="dot" style="background:#ffb26b"></span><span id="nameB">下一章</span></h2>
+      <label class="field row">
+        <span>不透明度</span>
+        <input type="range" id="opacityB" min="0" max="1" step="0.01" value="0.55" />
+      </label>
+      <label class="chk"><input type="checkbox" id="wireB" /> 线框</label>
+    </section>
+
+    <section>
+      <h2>偏移</h2>
+      <div class="info" id="offsetInfo"></div>
+      <div class="vecrow">
+        <label>X <input type="number" id="shiftX" step="8" /></label>
+        <label>Y <input type="number" id="shiftY" step="8" /></label>
+        <label>Z <input type="number" id="shiftZ" step="8" /></label>
+      </div>
+      <div class="btnrow">
+        <button id="alignBtn">对齐 landmark</button>
+        <button id="zeroBtn">不平移</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>飞行</h2>
+      <label class="field row">
+        <span>速度</span>
+        <input type="range" id="flySpeed" min="0.05" max="2" step="0.05" value="0.35" />
+      </label>
+      <div class="info" id="flyInfo"></div>
+    </section>
+
+    <section>
+      <h2>图层</h2>
+      <div id="layerToggles" class="layers"></div>
+      <label class="chk"><input type="checkbox" id="showSpawns" checked /> 出生点 / landmark</label>
+    </section>
+
+    <section>
+      <h2>坐标定位</h2>
+      <div class="vecrow">
+        <label>X <input type="number" id="locX" step="1" placeholder="0" /></label>
+        <label>Y <input type="number" id="locY" step="1" placeholder="0" /></label>
+        <label>Z <input type="number" id="locZ" step="1" placeholder="0" /></label>
+      </div>
+      <div class="btnrow">
+        <button id="locBtn">放置标记（A 坐标）</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>剖切</h2>
+      <label class="chk"><input type="checkbox" id="clipEnabled" /> 启用 Z 剖切</label>
+      <label class="field row"><span>Z ≤</span><input type="range" id="clipZ" min="-3000" max="4000" step="8" value="4000" /></label>
+      <div class="info" id="clipInfo"></div>
+    </section>
+
+    <section class="hint">
+      <p>左键旋转 · 中键平移 · 右键自由视角 · 滚轮缩放 · F 重置视角</p>
+      <p>WASD 前后左右移动 · Q/E 升降 · Shift 加速 · Ctrl 减速</p>
+      <p class="warn">Ctrl+W 会被浏览器当成关闭标签页，微调建议直接用左侧速度滑块</p>
+      <p>点击表面读取坐标（A 与 B 两套坐标系）</p>
+      <p>黄色 = clip 体积（卡墙判定），红色 = nodraw</p>
+    </section>
+  </aside>
+
+  <main id="view">
+    <div id="stats"></div>
+    <div id="readout" class="hidden"></div>
+    <div id="loading" class="overlay">加载中…</div>
+  </main>
+</div>
+<script type="module" src="/main.js"></script>
+</body>
+</html>
