@@ -14,8 +14,9 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { openVpk } from './vpk.js';
 import { parseEntityLump } from './bsp.js';
+import { getGameRoot } from './gamepath.js';
 import {
-  GAME_ROOT, officialMapsDirs, calcOffset, listCampaignMaps, listPairs,
+  officialMapsDirs, calcOffset, listCampaignMaps, listPairs,
 } from './offset.js';
 
 const BSP_HEADER_BYTES = 12 + 64 * 16;
@@ -28,11 +29,11 @@ function stripBsp(s) { return String(s || '').replace(/\.bsp$/i, ''); }
 function naturalCompare(a, b) { return a.localeCompare(b, 'en', { numeric: true, sensitivity: 'base' }); }
 function sanitizeName(s) { return String(s).replace(/[\\/:*?"<>|]/g, '_').trim() || 'addon'; }
 
-export function defaultAddonsDir(gameRoot = GAME_ROOT) {
+export function defaultAddonsDir(gameRoot = getGameRoot()) {
   return path.join(gameRoot, 'left4dead2', 'addons');
 }
 
-export function defaultWorkshopDir(gameRoot = GAME_ROOT) {
+export function defaultWorkshopDir(gameRoot = getGameRoot()) {
   return path.resolve(gameRoot, '..', '..', 'workshop', 'content', '550');
 }
 
@@ -42,7 +43,7 @@ function isVolumeFile(name) { return /_\d{3}\.vpk$/i.test(name); }
 
 // 列出可选的 addon：addons/*.vpk、addons/*/（散装）、workshop/content/550/*/。
 // 只做元数据扫描，不打开 VPK。
-export function listAddons(gameRoot = GAME_ROOT) {
+export function listAddons(gameRoot = getGameRoot()) {
   const out = [];
   const seen = new Set();
   const push = (item) => {
@@ -98,7 +99,7 @@ export function listAddons(gameRoot = GAME_ROOT) {
 
 // 接受：绝对/相对路径（.vpk 或散装目录）、addons 里的名字（可省略 .vpk）。
 // 同名既有 VPK 又有散装目录时优先 VPK；要选目录请直接传目录路径。
-export function resolveAddon(spec, gameRoot = GAME_ROOT) {
+export function resolveAddon(spec, gameRoot = getGameRoot()) {
   if (!spec) throw new Error('缺少 addon（--addon <vpk 或目录>）');
 
   const asPath = (c) => {
@@ -785,7 +786,7 @@ const OFFICIAL_PAKS = [
 ];
 
 // 从官方 pak01_dir.vpk 里读 missions/*.txt（不依赖散装 missions 文件）。
-export function readOfficialMissions(gameRoot = GAME_ROOT) {
+export function readOfficialMissions(gameRoot = getGameRoot()) {
   const campaigns = new Map();
   for (const rel of OFFICIAL_PAKS) {
     const file = path.join(gameRoot, ...rel.split('/'));
@@ -812,7 +813,7 @@ export function readOfficialMissions(gameRoot = GAME_ROOT) {
 }
 
 // 官方图：先用目录扫描得到基础相邻对，再用 VPK 内 missions 的 coop 顺序补充/覆盖。
-export function listOfficialPairs(mapsDirs = officialMapsDirs(), gameRoot = GAME_ROOT) {
+export function listOfficialPairs(mapsDirs = officialMapsDirs(), gameRoot = getGameRoot()) {
   const base = listPairs(mapsDirs);
   const maps = listCampaignMaps(mapsDirs);
   const existing = new Set(base.map((p) => `${lower(p.from)}|${lower(p.to)}`));

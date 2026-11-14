@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --bg: #14171c;
   --panel: #1b1f26;
   --panel2: #232833;
@@ -60,7 +61,7 @@ body.resizing { cursor: col-resize; user-select: none; }
 .field > span { display: block; color: var(--dim); margin-bottom: 4px; }
 .field.row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .field.row > span { margin: 0; white-space: nowrap; }
-select, input[type="number"], button {
+select, input[type="number"], input[type="text"], button {
   background: var(--panel2);
   color: var(--text);
   border: 1px solid var(--line);
@@ -71,7 +72,8 @@ select, input[type="number"], button {
 select { width: 100%; }
 input[type="range"] { width: 100%; accent-color: #6ea8fe; }
 .field.row input[type="range"] { width: 150px; }
-input[type="number"] { width: 100%; }
+input[type="number"], input[type="text"] { width: 100%; }
+#gameRootInput { font-size: 11px; }
 
 .vecrow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 8px 0; }
 .vecrow label { color: var(--dim); font-size: 11px; }

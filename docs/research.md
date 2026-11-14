@@ -242,3 +242,19 @@ DOM 里的 `.marker-label` 因而一直保留并累积。
 - **实测**：Amid The Ruins 4 对、splash1–5 4 对、ssv 仅注册 ssv1；解包字节数与早先临时结果一致；
   headless Edge 打开 `?pair=atr01_trailer_park|atr02_outskirts` 正常加载；页面勾选
   “地图 MOD测试地图” 后成功构建并报告 1 对偏移失败，重新构建 AtR 后自动切换到 atr01→atr02。
+
+### 8.9 游戏目录检测与官方图按需解析（2026-11-14 同日续）
+
+- **不再写死游戏路径**：新增 `src/gamepath.js`。优先级为 `--game-dir` / `L4D2_GAME_DIR`
+  > 页面保存的 `.mapstitch.json`（git 忽略）> Steam 自动检测 > 常见路径。
+  Steam 检测走 Windows 注册表 `SteamPath` / `InstallPath`，再解析
+  `steamapps/libraryfolders.vdf` 的 `"path"` 条目，因此安装在自定义库目录也能找到；
+  Linux/macOS 有 `~/.steam` / `~/Library/Application Support/Steam` 回退。
+  本机实测自动识别为 `…/Steam/steamapps/common/Left 4 Dead 2`（来源 `Steam 库`）。
+- **serve 不自动解析**：启动只打印检测到的游戏目录并提供静态页面/API。页面新增
+  「解析官方地图」按钮 → `POST /api/build/official` → 子进程执行
+  `build --all --merge`（保留已解析 addon），完成后刷新 index 并切到 c1m1。
+- **页面可改路径**：`POST /api/game-dir` 校验并保存 `.mapstitch.json`，接受游戏根目录、
+  `left4dead2` 或 `left4dead2/maps` 三种写法；保存后需再点一次解析官方地图。
+- **无 index 启动**：`index.json` 不存在时页面不再报错，而是显示“尚未解析地图”，
+  官方按钮与 addon 列表仍可用（用临时 `--out` 目录实测）。

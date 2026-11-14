@@ -34,6 +34,12 @@ const addonBuildBtn = document.getElementById('addonBuildBtn');
 const addonRefreshBtn = document.getElementById('addonRefreshBtn');
 const addonStatusEl = document.getElementById('addonStatus');
 const addonLogEl = document.getElementById('addonLog');
+const officialStatusEl = document.getElementById('officialStatus');
+const officialBuildBtn = document.getElementById('officialBuildBtn');
+const officialForceEl = document.getElementById('officialForce');
+const officialLogEl = document.getElementById('officialLog');
+const gameRootInput = document.getElementById('gameRootInput');
+const gameRootSaveBtn = document.getElementById('gameRootSaveBtn');
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x14171c);
@@ -869,6 +875,140 @@ function animate(t) {
 resize();
 requestAnimationFrame(animate);
 
+// ---------- 官方地图 / 游戏目录 ----------
+
+const officialUI = { building: false, gameRoot: '', index: null };
+
+function setOfficialBusy(busy) {
+  officialUI.building = busy;
+  officialBuildBtn.disabled = busy || !officialUI.gameRoot;
+  gameRootSaveBtn.disabled = busy;
+  officialForceEl.disabled = busy;
+  gameRootInput.disabled = busy;
+}
+
+function renderOfficial(game, index) {
+  if (game) officialUI.gameRoot = game.root || '';
+  if (index) officialUI.index = index;
+  if (document.activeElement !== gameRootInput) gameRootInput.value = officialUI.gameRoot;
+  const idx = officialUI.index || {};
+  const lines = [];
+  if (!officialUI.gameRoot) {
+    lines.push('未检测到 L4D2 游戏目录。请填写路径并点“保存路径”，或设置 L4D2_GAME_DIR。');
+  } else {
+    lines.push(`游戏目录：${officialUI.gameRoot}`);
+    if (game?.source) lines.push(`来源：${game.source}`);
+    if (idx.officialMaps) {
+      lines.push(`已解析 ${idx.officialMaps} 张官方地图 · ${idx.officialPairs || 0} 个官方章节对${idx.addonsTotal ? `（index 共 ${idx.pairsTotal} 对，另有 ${idx.addonsTotal} 个 addon）` : ''}`);
+    } else {
+      lines.push('尚未解析官方地图；点击“解析官方地图”后才会读取。');
+    }
+  }
+  officialStatusEl.textContent = lines.join('\n');
+  setOfficialBusy(officialUI.building);
+}
+
+async function saveGameDir() {
+  const value = gameRootInput.value.trim();
+  if (!value) { officialStatusEl.textContent = '请先填写游戏目录'; return; }
+  setOfficialBusy(true);
+  officialStatusEl.textContent = '保存路径…';
+  try {
+    const r = await fetch('/api/game-dir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gameRoot: value }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    renderOfficial(data.game, data.index);
+    await loadAddons();
+    officialStatusEl.textContent = `已保存游戏目录：${data.game.root}\n来源：${data.game.source}\n点击“解析官方地图”才会开始解析。`;
+  } catch (e) {
+    officialStatusEl.textContent = `保存失败: ${e.message}`;
+  } finally {
+    setOfficialBusy(false);
+  }
+}
+
+async function refreshIndexAfterBuild({ newPairs = [], campaigns = [], preferOfficial = false } = {}) {
+  try { state.index = await fetchIndex(); } catch { state.index = { maps: {}, pairs: [], addons: [] }; }
+  fillPairSelect();
+  const pairs = state.index.pairs.filter((p) => !p.error);
+  if (!pairs.length) {
+    loadingEl.textContent = Object.keys(state.index.maps || {}).length
+      ? '已解析地图，但没有可显示的相邻章节对（缺少共享 landmark）'
+      : '尚未解析地图：可在左侧点击「解析官方地图」或选择附加地图';
+    loadingEl.classList.remove('hidden');
+    return null;
+  }
+  loadingEl.classList.add('hidden');
+  const newKeys = new Set(newPairs.map((p) => `${p.from}|${p.to}`));
+  const camps = new Set(campaigns.map((c) => c.id));
+  let target = preferOfficial
+    ? (pairs.find((p) => !p.addon && p.campaign === 'c1') || pairs.find((p) => !p.addon))
+    : (pairs.find((p) => newKeys.has(`${p.from}|${p.to}`)) || pairs.find((p) => camps.has(p.campaign)));
+  target = target || pairs[0];
+  await setPair(target);
+  pairSelect.value = `${target.from}|${target.to}`;
+  return target;
+}
+
+async function pollOfficialJob(id) {
+  try {
+    const r = await fetch(`/api/job/${encodeURIComponent(id)}`, { cache: 'no-store' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    officialLogEl.textContent = j.log || '';
+    officialLogEl.scrollTop = officialLogEl.scrollHeight;
+    if (j.status === 'running') {
+      officialStatusEl.textContent = `解析官方地图… ${(j.elapsedMs / 1000).toFixed(1)}s`;
+      setTimeout(() => pollOfficialJob(id), 600);
+      return;
+    }
+    setOfficialBusy(false);
+    if (j.status === 'error') {
+      officialStatusEl.textContent = `解析失败: ${j.error || '未知错误'}`;
+      return;
+    }
+    const msg = `完成：已解析 ${j.result?.officialMaps || 0} 张官方地图 · ${j.result?.officialPairs || 0} 个官方章节对`;
+    await refreshIndexAfterBuild({ preferOfficial: true });
+    await loadAddons();
+    setOfficialBusy(false);
+    officialStatusEl.textContent = `${msg}\n游戏目录：${gameRootInput.value}`;
+  } catch (e) {
+    setOfficialBusy(false);
+    officialStatusEl.textContent = `任务状态读取失败: ${e.message}`;
+  }
+}
+
+async function startOfficialBuild() {
+  if (officialUI.building || !officialUI.gameRoot) return;
+  setOfficialBusy(true);
+  officialLogEl.classList.remove('hidden');
+  officialLogEl.textContent = '';
+  officialStatusEl.textContent = '提交解析任务…';
+  try {
+    const r = await fetch('/api/build/official', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force: officialForceEl.checked }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    pollOfficialJob(data.id);
+  } catch (e) {
+    setOfficialBusy(false);
+    officialStatusEl.textContent = `解析失败: ${e.message}`;
+  }
+}
+
+officialBuildBtn.addEventListener('click', startOfficialBuild);
+gameRootSaveBtn.addEventListener('click', saveGameDir);
+gameRootInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); saveGameDir(); }
+});
+
 // ---------- 附加地图 / VPK 选择 ----------
 
 const addonUI = { list: [], selected: new Set(), building: false };
@@ -935,6 +1075,7 @@ async function loadAddons() {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     addonUI.list = data.addons || [];
+    renderOfficial(data.game, data.index);
     const sources = new Set(addonUI.list.map((a) => a.source));
     for (const s of [...addonUI.selected]) if (!sources.has(s)) addonUI.selected.delete(s);
     renderAddons();
@@ -945,24 +1086,17 @@ async function loadAddons() {
   } catch (e) {
     addonListEl.innerHTML = '';
     addonStatusEl.textContent = `附加地图列表读取失败: ${e.message}`;
+    if (!officialUI.gameRoot) officialStatusEl.textContent = `状态读取失败: ${e.message}`;
   } finally {
     addonStatusEl.dataset.busy = '';
   }
 }
 
 async function refreshAfterAddonBuild(result) {
-  state.index = await fetchIndex();
-  fillPairSelect();
-  const pairs = state.index.pairs.filter((p) => !p.error);
-  if (!pairs.length) return;
-  const newKeys = new Set((result?.newPairs || []).map((p) => `${p.from}|${p.to}`));
-  const camps = new Set((result?.campaigns || []).map((c) => c.id));
-  const target = pairs.find((p) => newKeys.has(`${p.from}|${p.to}`))
-    || pairs.find((p) => camps.has(p.campaign));
-  if (target) {
-    await setPair(target);
-    pairSelect.value = `${target.from}|${target.to}`;
-  }
+  return refreshIndexAfterBuild({
+    newPairs: result?.newPairs || [],
+    campaigns: result?.campaigns || [],
+  });
 }
 
 async function pollAddonJob(id) {
@@ -1035,12 +1169,21 @@ addonBuildBtn.addEventListener('click', startAddonBuild);
 // ---------- 启动 ----------
 
 function fillPairSelect() {
+  pairSelect.innerHTML = '';
+  const allPairs = (state.index && state.index.pairs) || [];
+  if (!allPairs.length) {
+    const opt = document.createElement('option');
+    opt.textContent = '（尚无章节对）';
+    pairSelect.appendChild(opt);
+    pairSelect.disabled = true;
+    return;
+  }
+  pairSelect.disabled = false;
   const groups = new Map();
-  for (const p of state.index.pairs) {
+  for (const p of allPairs) {
     if (!groups.has(p.campaign)) groups.set(p.campaign, []);
     groups.get(p.campaign).push(p);
   }
-  pairSelect.innerHTML = '';
   for (const [camp, pairs] of groups) {
     const og = document.createElement('optgroup');
     const first = pairs[0];
@@ -1067,10 +1210,21 @@ function fillPairSelect() {
 
 (async () => {
   try {
-    state.index = await fetchIndex();
-    const pairs = state.index.pairs.filter((p) => !p.error);
-    if (!pairs.length) throw new Error('index.json 中没有可用的章节对，先运行 build');
+    try {
+      state.index = await fetchIndex();
+    } catch {
+      // 还没解析过任何地图时 index.json 不存在，这是正常状态
+      state.index = { maps: {}, pairs: [], addons: [] };
+    }
     fillPairSelect();
+    const pairs = state.index.pairs.filter((p) => !p.error);
+    if (!pairs.length) {
+      loadingEl.textContent = Object.keys(state.index.maps || {}).length
+        ? '已解析地图，但没有可显示的相邻章节对（缺少共享 landmark）'
+        : '尚未解析地图：在左侧点击「解析官方地图」，或勾选附加地图 addon';
+      loadingEl.classList.remove('hidden');
+      return;
+    }
     // 默认选第一对；可用 ?pair=c1m1_hotel|c1m2_streets 指定
     const wanted = PARAMS.get('pair');
     // 默认优先官方战役；addon 章节仍可从下拉框或 ?pair= 选择

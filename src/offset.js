@@ -8,14 +8,16 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { getGameRoot } from './gamepath.js';
 
-export const DEFAULT_MAPS_DIR =
-  process.env.L4D2_MAPS_DIR ||
-  'C:/Users/<用户名>/Home/Programs/Steam/steamapps/common/Left 4 Dead 2/left4dead2/maps';
+// 兼容旧调用；实际默认值在调用时由 getDefaultMapsDir() 动态计算。
+export const DEFAULT_MAPS_DIR = getDefaultMapsDir();
 
-// 官方地图分散在多个游戏目录；DEFAULT_MAPS_DIR 的上一级就是游戏根目录。
-export const GAME_ROOT =
-  process.env.L4D2_GAME_DIR || path.resolve(DEFAULT_MAPS_DIR, '..', '..');
+export function getDefaultMapsDir() {
+  if (process.env.L4D2_MAPS_DIR) return process.env.L4D2_MAPS_DIR;
+  const root = getGameRoot();
+  return root ? path.join(root, 'left4dead2', 'maps') : '';
+}
 
 export const OFFICIAL_MAPS_SUBDIRS = [
   'left4dead2/maps',
@@ -25,24 +27,30 @@ export const OFFICIAL_MAPS_SUBDIRS = [
   'update/maps',
 ];
 
-export function officialMapsDirs(gameRoot = GAME_ROOT) {
+// 官方地图分散在多个游戏目录；没有检测到游戏目录时返回空数组。
+export function officialMapsDirs(gameRoot = getGameRoot()) {
+  if (!gameRoot) return [];
   return OFFICIAL_MAPS_SUBDIRS
     .map((sub) => path.join(gameRoot, ...sub.split('/')))
     .filter((dir) => fs.existsSync(dir));
 }
 
 function asDirList(mapsDir) {
-  return Array.isArray(mapsDir) ? mapsDir : [mapsDir];
+  return (Array.isArray(mapsDir) ? mapsDir : [mapsDir]).filter(Boolean);
 }
 
-export function resolveMap(nameOrPath, mapsDir = DEFAULT_MAPS_DIR) {
+export function resolveMap(nameOrPath, mapsDir = getDefaultMapsDir()) {
   if (path.isAbsolute(nameOrPath)) {
     const withExt = nameOrPath.toLowerCase().endsWith('.bsp') ? nameOrPath : `${nameOrPath}.bsp`;
     if (!fs.existsSync(withExt)) throw new Error(`找不到地图文件: ${withExt}`);
     return withExt;
   }
+  const dirs = asDirList(mapsDir);
+  if (!dirs.length) {
+    throw new Error('未找到 L4D2 安装目录：请设置 L4D2_GAME_DIR，或在页面左侧填写游戏目录');
+  }
   const tried = [];
-  for (const dir of asDirList(mapsDir)) {
+  for (const dir of dirs) {
     const p = path.join(dir, nameOrPath);
     const withExt = p.toLowerCase().endsWith('.bsp') ? p : `${p}.bsp`;
     if (fs.existsSync(withExt)) return withExt;
@@ -52,7 +60,7 @@ export function resolveMap(nameOrPath, mapsDir = DEFAULT_MAPS_DIR) {
 }
 
 // mapsDir 可以是单个目录或目录数组（官方图分散在 left4dead2/maps、*_dlc*/maps、update/maps）
-export function listCampaignMaps(mapsDir = DEFAULT_MAPS_DIR) {
+export function listCampaignMaps(mapsDir = getDefaultMapsDir()) {
   const campaigns = new Map();
   // 官方 maps 目录里还有 c5m1_waterfront_sndscape 这类非章节变体，排除
   const isVariant = (f) => /(_sndscape|_exclude|_vs|_l4d1|_test)/i.test(f);
@@ -79,7 +87,7 @@ export function listCampaignMaps(mapsDir = DEFAULT_MAPS_DIR) {
   return out;
 }
 
-export function listPairs(mapsDir = DEFAULT_MAPS_DIR) {
+export function listPairs(mapsDir = getDefaultMapsDir()) {
   const pairs = [];
   for (const [campaign, list] of listCampaignMaps(mapsDir)) {
     for (let i = 0; i + 1 < list.length; i++) pairs.push({ campaign, from: list[i], to: list[i + 1] });

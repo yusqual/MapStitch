@@ -15,11 +15,18 @@ L4D2 跨章节地图拼接可视化工具。读取相邻两章 BSP，按 `info_l
 cd MapStitch
 npm install            # 只装 three.js（可选 lzma-native 用于创意工坊压缩图）
 
-node src/cli.js build --all     # 解析 c1–c14 全部官方图（含 DLC 目录），导出 out/maps/*.mst + out/index.json
 node src/cli.js serve           # 打开 http://localhost:8123/
+# 页面左侧点「解析官方地图」后才会读取 c1–c14；serve 启动本身不解析任何地图
 ```
 
-全量 57 张官方图约 3 秒。修改代码或想重新导出时加 `--force`。
+也可以在命令行预先解析（57 张约 3 秒）：
+
+```bash
+node src/cli.js build --all     # 导出 out/maps/*.mst + out/index.json
+```
+
+游戏目录不写死：自动从 Steam 注册表与 `libraryfolders.vdf` 查找，也支持
+`--game-dir <目录>`、`L4D2_GAME_DIR`，或直接在页面里修改并保存。
 
 创意工坊 / addon 地图只加载选中的那一个，VPK 自动解包到 `out/cache/`。
 也可以直接在页面左侧「附加地图 / VPK」勾选并解析，无需命令行：
@@ -36,6 +43,7 @@ node src/cli.js build --addon "Journey to Splash Mountain - Part 1" \
 | 操作 | 说明 |
 |---|---|
 | 拖动左侧分隔条 | 调整面板宽度（双击恢复默认，自动记住） |
+| 官方地图 | 首次使用点「解析官方地图」；`serve` 启动不会自动解析 |
 | 左键拖动 | 环绕旋转 |
 | 中键拖动 | 平移 |
 | 右键拖动 | 原地自由视角（只转朝向，不移动相机） |
@@ -71,7 +79,8 @@ B 坐标 = p - B平移量        （默认 B平移量 = -offset，即 B坐标 = 
 ```
 node src/cli.js pairs [campaign]                 只算偏移表（秒级，只读实体块）
 node src/cli.js pairs --addon "Amid The Ruins"   只看选中 addon 的偏移（不解包）
-node src/cli.js build --all                      导出全部官方战役（c1–c14，含 DLC 目录）
+node src/cli.js build --all [--merge]            导出全部官方战役（c1–c14，含 DLC 目录）
+node src/cli.js pairs c14 --game-dir <游戏目录>    指定游戏安装目录（也可用 L4D2_GAME_DIR）
 node src/cli.js build --campaign c2              只导出某个战役
 node src/cli.js build --addon <vpk或目录>         解包选中 addon 并合并进 index（可重复）
 node src/cli.js build c1m1_hotel c1m2_streets    只导出指定相邻两章
@@ -94,6 +103,7 @@ B 点 = A + 偏移 = (2504.0, 5128.0, 512.0):
 ## 数据与实现
 
 - `src/bsp.js` — L4D2 BSP v21 读取器（实体、几何、材质、位移、brush、BSP 树）
+- `src/gamepath.js` — L4D2 安装目录检测（Steam 注册表 / libraryfolders.vdf / 环境变量 / 页面配置）
 - `src/vpk.js` — VPK v1 读取器（跳过 preload、内嵌 `archiveIndex=32767`、分卷 `*_NNN.vpk`）
 - `src/addon.js` — addon 发现、missions coop 解析、changelevel 配对、解包缓存
 - `src/geometry.js` — BSP → 三角网格；分层（world / disp / sky / nodraw / water / clip / detail）

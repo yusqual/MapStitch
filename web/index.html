@@ -22,6 +22,21 @@
       <p class="sub">L4D2 跨章节地图拼接</p>
     </header>
 
+    <section id="officialSection">
+      <h2>官方地图</h2>
+      <div class="info" id="officialStatus">检查中…</div>
+      <label class="field">
+        <span>游戏目录（自动检测，可修改）</span>
+        <input type="text" id="gameRootInput" spellcheck="false" placeholder="…/steamapps/common/Left 4 Dead 2" />
+      </label>
+      <div class="btnrow">
+        <button id="gameRootSaveBtn">保存路径</button>
+        <button id="officialBuildBtn">解析官方地图</button>
+      </div>
+      <label class="chk"><input type="checkbox" id="officialForce" /> 强制重建（忽略 mst 缓存）</label>
+      <pre id="officialLog" class="joblog hidden"></pre>
+    </section>
+
     <section id="addonSection">
       <h2>附加地图 / VPK</h2>
       <div id="addonList" class="addonlist"><span class="info">扫描 addons…</span></div>

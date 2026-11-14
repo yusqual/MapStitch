@@ -13,7 +13,9 @@
 //   node src/cli.js addons [filter]         列出 addons/创意工坊 addon（--inspect 看地图数）
 //   node src/cli.js vpk <file> [prefix]     列出 VPK 目录树（验证 preload/分卷）
 //
-// 选项：--maps-dir <dir>（可重复）  --addon <spec>（可重复）  --out <dir>  --force
+// 选项：--game-dir <dir>  --maps-dir <dir>（可重复）  --addon <spec>（可重复）
+//       --out <dir>  --force  --merge（build --all 时与已有 index 合并）
+// 游戏目录默认从 Steam 注册表/库目录自动检测，也可用 L4D2_GAME_DIR 覆盖。
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,6 +33,9 @@ import {
   listAddons, resolveAddon, openContent, scanAddon, parseMissionsText, listOfficialPairs,
   analyzeAddons, materializeAddons,
 } from './addon.js';
+import {
+  getGameInfo, getGameRoot, setGameRoot,
+} from './gamepath.js';
 import { openVpk } from './vpk.js';
 import { brushesAtPoint } from './query.js';
 
@@ -39,25 +44,42 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 function parseArgs(argv) {
   const opts = {
     mapsDir: null,
+    mapsDirs: [],
     addons: [],
     out: path.join(ROOT, 'out'),
     force: false,
+    merge: false,
+    gameRoot: '',
   };
-  const mapsDirs = [];
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--maps-dir') mapsDirs.push(argv[++i]);
+    if (a === '--maps-dir') opts.mapsDirs.push(argv[++i]);
+    else if (a === '--game-dir') opts.gameRoot = argv[++i];
     else if (a === '--addon') opts.addons.push(argv[++i]);
     else if (a === '--out') opts.out = path.resolve(argv[++i]);
     else if (a === '--port') opts.port = Number(argv[++i]);
     else if (a === '--force') opts.force = true;
+    else if (a === '--merge') opts.merge = true;
     else rest.push(a);
   }
-  opts.mapsDir = mapsDirs.length
-    ? mapsDirs
-    : (process.env.L4D2_MAPS_DIR ? [process.env.L4D2_MAPS_DIR] : officialMapsDirs());
   return { opts, rest };
+}
+
+// --game-dir 优先于自动检测；--maps-dir 优先于游戏目录推导。
+function applyGameOptions(opts) {
+  if (opts.gameRoot) {
+    try {
+      setGameRoot(opts.gameRoot, { persist: false });
+    } catch (e) {
+      throw new Error(e.message);
+    }
+  }
+  if (opts.mapsDirs.length) opts.mapsDir = opts.mapsDirs;
+  else if (process.env.L4D2_MAPS_DIR) opts.mapsDir = [process.env.L4D2_MAPS_DIR];
+  else opts.mapsDir = officialMapsDirs();
+  opts.gameRoot = getGameRoot();
+  return opts;
 }
 
 function fmtVec(v, digits = 1) { return `(${v.map((x) => Number(x).toFixed(digits)).join(', ')})`; }
@@ -394,7 +416,11 @@ function apiAddons(res, opts) {
     }
     out.push({ ...summary, built: built.has(key) });
   }
-  sendJson(res, 200, { addons: out });
+  sendJson(res, 200, {
+    addons: out,
+    game: { ...getGameInfo(), mapsDirs: officialMapsDirs() },
+    index: indexSummary(opts.out),
+  });
 }
 
 function readJsonBody(req, limit = 64 * 1024) {
@@ -413,24 +439,39 @@ function readJsonBody(req, limit = 64 * 1024) {
   });
 }
 
-function startAddonJob(specs, opts, force) {
+function indexSummary(outDir) {
+  const index = readIndexFile(outDir);
+  const maps = (index && index.maps) || {};
+  const pairs = (index && index.pairs) || [];
+  return {
+    mapsTotal: Object.keys(maps).length,
+    officialMaps: Object.values(maps).filter((m) => m && !m.addon).length,
+    officialPairs: pairs.filter((p) => !p.addon).length,
+    pairsTotal: pairs.length,
+    addonsTotal: ((index && index.addons) || []).length,
+  };
+}
+
+function buildBaseArgs(opts) {
+  const args = [CLI_FILE, 'build', '--out', opts.out];
+  const root = opts.gameRoot || getGameRoot();
+  if (root) args.push('--game-dir', root);
+  for (const d of opts.mapsDirs || []) args.push('--maps-dir', d);
+  return args;
+}
+
+function startBuildJob(args, opts, { kind, specs = [], summarize = null }) {
   if (runningJob && jobs.get(runningJob)?.status === 'running') {
     throw new Error('已有解析任务在运行，请等待完成');
   }
-  const addons = specs.map((s) => resolveAddonForApi(s));
   const id = randomUUID();
   const before = readIndexFile(opts.out);
   const beforePairs = new Set(((before && before.pairs) || []).map((p) => `${p.from}|${p.to}`));
   const job = {
-    id, status: 'running', startedAt: Date.now(), log: [], result: null, error: '',
-    specs: addons.map((a) => ({ id: a.id, name: a.name, kind: a.kind, source: a.source })),
+    id, kind, status: 'running', startedAt: Date.now(), log: [], result: null, error: '', specs,
   };
   jobs.set(id, job);
   runningJob = id;
-
-  const args = [CLI_FILE, 'build', '--out', opts.out];
-  for (const a of addons) args.push('--addon', a.source);
-  if (force) args.push('--force');
 
   const child = spawn(process.execPath, args, { cwd: ROOT, env: process.env });
   const pushLog = (line) => {
@@ -462,24 +503,20 @@ function startAddonJob(specs, opts, force) {
       const after = readIndexFile(opts.out);
       const afterPairs = (after && after.pairs) || [];
       const newPairs = afterPairs.filter((p) => !beforePairs.has(`${p.from}|${p.to}`));
-      const sources = new Set(addons.map((a) => path.resolve(a.source).toLowerCase()));
-      const campaigns = [];
-      const builtAddons = [];
-      for (const a of (after && after.addons) || []) {
-        if (!(a.entries || []).some((e) => sources.has(path.resolve(e.source).toLowerCase()))) continue;
-        builtAddons.push({ id: a.id, name: a.name });
-        for (const c of a.campaigns || []) campaigns.push({ id: c.id, name: c.name, chapters: c.chapters });
-      }
-      job.status = 'done';
       const usable = newPairs.filter((p) => !p.error);
+      job.status = 'done';
       job.result = {
+        kind,
         newPairs,
         usableCount: usable.length,
         failedCount: newPairs.length - usable.length,
-        campaigns,
-        addons: builtAddons,
+        ...(summarize ? summarize(after, newPairs) : {}),
       };
-      pushLog(`完成：${usable.length} 个可用章节对${newPairs.length > usable.length ? `，${newPairs.length - usable.length} 个偏移失败` : ''}`);
+      if (kind === 'official') {
+        pushLog(`完成：官方地图 ${job.result.officialMaps} 张 / ${job.result.officialPairs} 对，index 共 ${job.result.mapsTotal} 张图 / ${job.result.pairsTotal} 对`);
+      } else {
+        pushLog(`完成：${usable.length} 个可用章节对${newPairs.length > usable.length ? `，${newPairs.length - usable.length} 个偏移失败` : ''}`);
+      }
     }
     runningJob = null;
   });
@@ -488,6 +525,49 @@ function startAddonJob(specs, opts, force) {
   const finished = [...jobs.values()].filter((j) => j.status !== 'running').sort((a, b) => b.startedAt - a.startedAt);
   for (const j of finished.slice(20)) jobs.delete(j.id);
   return job;
+}
+
+function startAddonJob(specs, opts, force) {
+  const addons = specs.map((s) => resolveAddonForApi(s));
+  const args = buildBaseArgs(opts);
+  for (const a of addons) args.push('--addon', a.source);
+  if (force) args.push('--force');
+  return startBuildJob(args, opts, {
+    kind: 'addon',
+    specs: addons.map((a) => ({ id: a.id, name: a.name, kind: a.kind, source: a.source })),
+    summarize: (after) => {
+      const sources = new Set(addons.map((a) => path.resolve(a.source).toLowerCase()));
+      const campaigns = [];
+      const builtAddons = [];
+      for (const a of (after && after.addons) || []) {
+        if (!(a.entries || []).some((e) => sources.has(path.resolve(e.source).toLowerCase()))) continue;
+        builtAddons.push({ id: a.id, name: a.name });
+        for (const c of a.campaigns || []) campaigns.push({ id: c.id, name: c.name, chapters: c.chapters });
+      }
+      return { campaigns, addons: builtAddons };
+    },
+  });
+}
+
+function startOfficialJob(opts, force) {
+  const args = buildBaseArgs(opts);
+  args.push('--all', '--merge');
+  if (force) args.push('--force');
+  return startBuildJob(args, opts, {
+    kind: 'official',
+    summarize: (after) => {
+      const maps = (after && after.maps) || {};
+      const pairs = (after && after.pairs) || [];
+      return {
+        mapsTotal: Object.keys(maps).length,
+        officialMaps: Object.values(maps).filter((m) => m && !m.addon).length,
+        officialPairs: pairs.filter((p) => !p.addon).length,
+        pairsTotal: pairs.length,
+        addonsTotal: ((after && after.addons) || []).length,
+        game: getGameInfo(),
+      };
+    },
+  });
 }
 
 // 允许传 addon.id / 名称 / 路径（与 CLI 的 --addon 解析一致）
@@ -510,11 +590,45 @@ async function handleAddonBuild(req, res, opts) {
   }
 }
 
+async function handleOfficialBuild(req, res, opts) {
+  let body = {};
+  try { body = await readJsonBody(req); } catch { /* 允许空 body */ }
+  if (!officialMapsDirs().length) {
+    sendJson(res, 400, { error: '未检测到 L4D2 安装目录：请先填写并保存游戏目录，或设置 L4D2_GAME_DIR' });
+    return;
+  }
+  try {
+    const job = startOfficialJob(opts, Boolean(body.force));
+    sendJson(res, 202, { id: job.id });
+  } catch (e) {
+    sendJson(res, e.message.includes('已有解析任务') ? 409 : 400, { error: e.message });
+  }
+}
+
+async function handleGameDir(req, res, opts) {
+  let body;
+  try { body = await readJsonBody(req); } catch (e) { sendJson(res, 400, { error: e.message }); return; }
+  try {
+    const info = setGameRoot(String(body.gameRoot || ''));
+    opts.gameRoot = info.root;
+    opts.mapsDir = opts.mapsDirs.length
+      ? opts.mapsDirs
+      : (process.env.L4D2_MAPS_DIR ? [process.env.L4D2_MAPS_DIR] : officialMapsDirs(info.root));
+    addonScanCache.clear();
+    sendJson(res, 200, {
+      game: { ...info, mapsDirs: officialMapsDirs(info.root) },
+      index: indexSummary(opts.out),
+    });
+  } catch (e) {
+    sendJson(res, 400, { error: e.message });
+  }
+}
+
 function apiJob(id, res) {
   const job = jobs.get(id);
   if (!job) { sendJson(res, 404, { error: '任务不存在' }); return; }
   sendJson(res, 200, {
-    id: job.id, status: job.status, error: job.error, result: job.result,
+    id: job.id, kind: job.kind, status: job.status, error: job.error, result: job.result,
     specs: job.specs, log: job.log.join('\n'),
     elapsedMs: (job.finishedAt || Date.now()) - job.startedAt,
   });
@@ -535,6 +649,9 @@ const MIME = {
 function serve(opts) {
   const port = opts.port || 8123;
   const sources = mapSourcesFromIndex(opts.out);
+  const game = getGameInfo();
+  if (game.root) console.log(`游戏目录: ${game.root}（${game.source}）`);
+  else console.log('未检测到 L4D2 安装目录：可在页面填写，或设置 L4D2_GAME_DIR');
   if (sources.size) console.log(`index.json 中 ${sources.size} 张地图带 source 路径`);
   const roots = [
     { prefix: '/out/', dir: opts.out },
@@ -549,6 +666,16 @@ function serve(opts) {
     if (parsed.pathname === '/api/addon/build') {
       if (req.method !== 'POST') { sendJson(res, 405, { error: '请用 POST' }); return; }
       handleAddonBuild(req, res, opts);
+      return;
+    }
+    if (parsed.pathname === '/api/build/official') {
+      if (req.method !== 'POST') { sendJson(res, 405, { error: '请用 POST' }); return; }
+      handleOfficialBuild(req, res, opts);
+      return;
+    }
+    if (parsed.pathname === '/api/game-dir') {
+      if (req.method !== 'POST') { sendJson(res, 405, { error: '请用 POST' }); return; }
+      handleGameDir(req, res, opts);
       return;
     }
     const jobMatch = /^\/api\/job\/([\w-]+)$/.exec(parsed.pathname);
@@ -693,6 +820,7 @@ function checkPoint(rest, opts) {
 function main() {
   const argv = process.argv.slice(2);
   const { opts, rest } = parseArgs(argv);
+  applyGameOptions(opts);
   const cmd = rest.shift();
 
   if (!cmd || cmd === '-h' || cmd === '--help') {
@@ -722,9 +850,9 @@ function main() {
     }
     let pairs;
     let merge = true;
-    if (rest[0] === '--all') { pairs = listOfficialPairs(opts.mapsDir); merge = false; }
+    if (rest[0] === '--all') { pairs = listOfficialPairs(opts.mapsDir); merge = opts.merge; }
     else if (rest[0] === '--campaign') pairs = listOfficialPairs(opts.mapsDir).filter((p) => p.campaign === rest[1]);
-    else if (rest[0] === '--pairs') { pairs = listOfficialPairs(opts.mapsDir); merge = false; }
+    else if (rest[0] === '--pairs') { pairs = listOfficialPairs(opts.mapsDir); merge = opts.merge; }
     else if (rest.length >= 2) {
       const from = path.basename(rest[0], '.bsp');
       const to = path.basename(rest[1], '.bsp');

@@ -24,25 +24,29 @@ MapStitch 把相邻两章按 offset 叠到同一个世界坐标里，并提供�
 
 | 项目 | 要求 |
 |---|---|
-| 系统 | Windows（官方图默认路径按 Windows 写死，可用参数覆盖） |
+| 系统 | Windows（Steam 路径自动检测；Linux/macOS 有常见路径回退） |
 | Node.js | 18+，实测 v24.22.1 |
 | 浏览器 | 支持 WebGL2 与 importmap 的现代浏览器（Edge / Chrome） |
 | 游戏 | 本机安装 L4D2；官方图分散在 `left4dead2/maps`、`left4dead2_dlc1/2/3/maps`、`update/maps` |
 
-默认按顺序扫描以上 5 个官方目录（共 57 张 c1–c14 地图）：
+**游戏目录不再写死。** 启动时会按以下顺序查找：
 
-```
-C:/Users/<用户名>/Home/Programs/Steam/steamapps/common/Left 4 Dead 2/left4dead2/maps
-C:/Users/<用户名>/Home/Programs/Steam/steamapps/common/Left 4 Dead 2/left4dead2_dlc1/maps
-...
-```
+1. 命令行 `--game-dir <目录>`（仅 CLI）；
+2. 环境变量 `L4D2_GAME_DIR`；
+3. 页面里保存的 `.mapstitch.json`（git 忽略）；
+4. Steam 自动检测：Windows 注册表的 `SteamPath` / `InstallPath`，再解析
+   `steamapps/libraryfolders.vdf`，支持安装在自定义 Steam 库目录；
+5. 常见默认路径（`Program Files*/Steam`、Linux/macOS 的 Steam 目录）。
 
-换机器或自定义目录时，二选一（`--maps-dir` 可重复）：
+检测到后在页面「官方地图 → 游戏目录」里显示，也可以直接改成任意安装路径并保存。
+只想手动指定地图目录时，仍可使用 `--maps-dir <dir>`（可重复）或 `L4D2_MAPS_DIR`。例如：
 
 ```bash
-node src/cli.js build --all --maps-dir "D:/Steam/.../left4dead2/maps"
-set L4D2_MAPS_DIR=D:\Steam\...\left4dead2\maps
+node src/cli.js pairs c14 --game-dir "D:/Steam/steamapps/common/Left 4 Dead 2"
+set L4D2_GAME_DIR=D:\Steam\steamapps\common\Left 4 Dead 2
 ```
+
+官方图会扫描 5 个目录（共 57 张 c1–c14 地图）。
 
 ## 3. 安装与启动
 
@@ -50,8 +54,14 @@ set L4D2_MAPS_DIR=D:\Steam\...\left4dead2\maps
 cd MapStitch
 npm install                    # 安装 three.js；lzma-native 为可选依赖
 
-node src/cli.js build --all    # 解析 c1–c14 全部官方图（约 3 秒）
 node src/cli.js serve          # 默认 http://localhost:8123/
+# 打开页面后点「解析官方地图」（不会在服务启动时自动解析）
+```
+
+也可以提前在命令行解析（约 3 秒）：
+
+```bash
+node src/cli.js build --all
 ```
 
 `build` 的产物在 `out/`：
@@ -136,7 +146,9 @@ node src/cli.js pairs --addon "A.vpk" --addon "B.vpk"
 
 | 区域 | 说明 |
 |---|---|
-| 章节过渡 | 18 个官方相邻章节对，切换后自动加载并重算偏移 |
+| 官方地图 | 显示检测到的游戏目录；可修改并保存；点「解析官方地图」才会读取 57 张官方图 |
+| 附加地图 / VPK | 勾选 addon 后「解析并加入」，见上一节 |
+| 章节过渡 | 官方 43 个相邻章节对 + 已解析 addon 的章节对，切换后自动加载并重算偏移 |
 | 上一章 / 下一章 | 分别调不透明度与线框。把 B 调低可以"透视"到 A 的几何 |
 | 偏移 | 显示 `B - A` 的偏移量；下方 X/Y/Z 是 B 的**平移量**，默认 `-offset` |
 | 对齐 landmark | 把 B 平移回 `-offset`，两图 landmark 重合 |
@@ -244,13 +256,16 @@ node src/cli.js pairs --addon "Amid The Ruins"
 ### `build`
 
 ```bash
-node src/cli.js build --all [--force]
+node src/cli.js build --all [--force] [--merge]
 node src/cli.js build --campaign c1 [--force]
 node src/cli.js build <from> <to> [landmark] [--force]
 node src/cli.js build --addon <vpk或目录> [--addon ...] [--force]
 ```
 
-`--out <dir>` 指定输出目录（默认 `MapStitch/out`），`--maps-dir <dir>` 指定官方地图目录（可重复）。
+`--out <dir>` 指定输出目录（默认 `MapStitch/out`），`--game-dir <dir>` 指定安装目录，
+`--maps-dir <dir>` 指定官方地图目录（可重复）。
+`build --all` 默认重建官方部分（会清掉 index 里的 addon）；加 `--merge` 则保留已有 addon，
+页面上的「解析官方地图」按钮用的就是 `--all --merge`。
 不带 `--addon` 时只处理官方图；带 `--addon` 时只解包选中的 addon 并合并进 index。
 
 ### `addons` / `vpk`
@@ -269,7 +284,8 @@ node src/cli.js vpk <file.vpk> [path前缀] [--missions]
 node src/cli.js serve [--port 8123] [--out <dir>]
 ```
 
-静态服务器同时提供 `/api/point` 用于落点判定。端口被占用时换一个：
+`serve` 本身**不会解析任何地图**，只提供页面和 `/api/point`；官方图与 addon 都由页面按钮
+按需解析。端口被占用时换一个：
 
 ```bash
 node src/cli.js serve --port 8124
@@ -327,7 +343,13 @@ node tools/check_disp.js "C:/.../left4dead2/maps"
 先运行 `node src/cli.js build --all`，并确认是从 `MapStitch` 目录启动 `serve`。
 
 **`找不到地图文件: ...bsp`**
-检查 `--maps-dir` 或 `L4D2_MAPS_DIR`；官方图应在 `left4dead2/maps/` 下直接是 `.bsp`。
+先看页面「官方地图 → 游戏目录」是否显示正确路径；不对就直接修改并保存，或设置
+`--game-dir` / `L4D2_GAME_DIR`。官方图应在 `left4dead2/maps/` 下直接是 `.bsp`。
+也可以用 `--maps-dir` / `L4D2_MAPS_DIR` 单独指定地图目录。
+
+**页面一直显示「尚未解析地图」**
+这是正常的初始状态：`serve` 不会自动解析。点「解析官方地图」或勾选 addon 后才会生成
+`out/index.json`。
 
 **创意工坊地图**
 
@@ -371,6 +393,7 @@ npm install lzma-native
 MapStitch/
 ├─ src/
 │  ├─ bsp.js        BSP v21 读取（lump 表、实体、几何、材质、位移、brush、BSP 树）
+│  ├─ gamepath.js   L4D2 安装目录检测（Steam 注册表/库目录、环境变量、页面配置）
 │  ├─ vpk.js        VPK v1 读取（preload、内嵌 32767、分卷）
 │  ├─ addon.js      addon 发现、missions 解析、地图配对、解包缓存
 │  ├─ geometry.js   BSP → 分层网格（含位移面与 clip 凸多面体重建）
