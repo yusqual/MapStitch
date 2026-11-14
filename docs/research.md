@@ -36,7 +36,7 @@ L4D2 速通中有一种"电击器传点"操作：
 5. **偏移公式**：`offset = 下一图 landmark 坐标 - 上一图 landmark 坐标`；`新图坐标 = 旧图坐标 + offset`。
 6. 零偏移真实存在（c1m3→c1m4、c4m4→c4m5 等是同一世界切分的地图）。
 
-本机环境：游戏路径 `C:/Users/<用户名>/Home/Programs/Steam/steamapps/common/Left 4 Dead 2`（官方图在 `left4dead2/maps/` 下是散装 .bsp）；本机有 Node v24；本地代理 `127.0.0.1:<代理端口>`。
+环境：游戏目录可在页面设置中手动指定，或由 CLI 自动检测 Steam 库（官方图在 `left4dead2/maps/` 下是散装 .bsp）。开发环境需 Node ≥ 18。
 
 ## 3. 需要读取的地图数据（分层）
 
