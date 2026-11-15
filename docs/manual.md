@@ -1,7 +1,7 @@
 # MapStitch 使用手册
 
 > 适用版本：MapStitch 0.1.0（2026-11-15）
-> 相关文档：[调研与实现记录](research.md) · [剩余需求分析](roadmap.md) · [项目说明](../README.md)
+> 相关文档：[调研与实现记录](research.md) · [需求分析与实现记录](roadmap.md) · [项目说明](../README.md)
 
 ## 1. 这个工具解决什么问题
 
@@ -433,7 +433,8 @@ MapStitch/
 │  ├─ export.js     .mst 二进制格式
 │  └─ cli.js        命令行入口 + 静态服务器 + /api/point
 ├─ web/             three.js 查看器（index.html / main.js / style.css）
-├─ tools/           check_disp.js（位移面校验）、probe_brush.js（brush 重建验证）、inspect_bsp.js
+├─ tools/           check_disp.js（位移面校验）、check_props.js（props 对账/点查询）、
+│                   probe_brush.js（brush 重建验证）、inspect_bsp.js
 ├─ start.bat        启动脚本（便携包用；开发目录没带 node/ 时回退系统 node）
 ├─ pack.ps1         一键打包便携包
 ├─ docs/            research.md（调研/实现记录）、manual.md（本手册）

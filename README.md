@@ -10,7 +10,7 @@ L4D2 跨章节地图拼接可视化工具。读取相邻两章 BSP，按 `info_l
 ![点击读坐标与 B 落点判定](docs/screenshot-check.png)
 
 完整操作说明见 **[使用手册](docs/manual.md)**；实现细节与技术结论见 [调研/实现记录](docs/research.md)；
-剩余 180° 旋转与 prop_static 的工作量、验证结论和设计建议见 [剩余需求分析](docs/roadmap.md)。
+180° 旋转、prop_static 与创意工坊 VPK 的需求分析、实现记录和验证结论见 [需求分析与实现记录](docs/roadmap.md)（三项均已完成）。
 
 ## 快速开始
 

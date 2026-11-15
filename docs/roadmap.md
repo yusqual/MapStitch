@@ -1,4 +1,4 @@
-# 剩余需求分析与验证记录
+# 需求分析与实现记录
 
 > 日期：2026-11-14（2026-11-15 补旋转与 prop_static 实现记录）
 > 状态：**① 创意工坊 VPK、② 180° 旋转、③ prop_static 包围盒均已实现**
@@ -38,15 +38,9 @@
 - c14 只有两张图：`c14m1_junkyard → c14m2_lighthouse`，landmark `cp_landmark`，偏移 `(5344, -11392, 576)`。
 - 实现①后，`build --all` 默认合并以上 5 个目录（57 张图、43 个相邻对），index 中每张图记录绝对 `source`。
 
-临时加载 DLC 的方法（现版本可用，但不是最终方案）：
-
-```bash
-node src/cli.js build --campaign c6 --maps-dir "C:/.../left4dead2_dlc1/maps"
-node src/cli.js serve --port 8125 --maps-dir "C:/.../left4dead2_dlc1/maps"
-```
-
-`build --campaign` 会与已有 index 合并，不会清掉 c1–c5。注意 `/api/point` 的落点判定使用的是
-`serve --maps-dir` 指向的单个目录，所以检查 DLC 图时需要为对应目录单独起服务。
+手动指定目录的方式（`--maps-dir` 可重复）仍可用于临时调试；实现①后 `build --all`
+已自动合并全部 5 个目录，index 记录绝对 `source`，`serve` 不再需要 `--maps-dir`
+即可对任意 DLC 图做 `/api/point` 落点判定（见 [§2.6](#26-实现记录2026-11-14)）。
 
 ---
 

@@ -1,7 +1,8 @@
 # MapStitch — L4D2 跨章节地图拼接可视化工具 · 调研文档
 
 > 调研日期：2026-11-14
-> 状态：已按路线 B 实现（自研 BSP 解析 + three.js 查看器），见 §8 与 README.md。
+> 状态：已按路线 B 实现（自研 BSP 解析 + three.js 查看器），见 §8 与 README.md；
+> 180° 旋转与 prop_static 的实现记录见 [需求分析与实现记录](roadmap.md)。
 > 后续开发建议新开会话，并将本文档作为上下文起点。
 
 ## 1. 项目目标
@@ -142,13 +143,14 @@ brush→model 归属用每个 dmodel 的 BSP 树遍历叶节点（NODES/LEAFS/LE
 
 - `out/maps/<map>.mst`：分层三角网格（位置/法线 Float32 + 颜色 Uint8）
 - `out/index.json`：地图元数据、landmark、出生点、18 个相邻章节对的偏移
+  （当日仅索引 c1–c5；实现①后扩至 57 图 / 43 对，见 §8.5 与 §8.8）
 - `web/`：three.js 交互查看器（偏移滑块、透明度、线框、图层、Z 剖切、点击读坐标）
 - `src/cli.js check`：给定 A 坐标，输出 B 坐标及所在 solid/clip/water brush（含穿透深度）
 
 ### 8.5 未做
 
 prop_static 包围盒、180° 旋转换关（这两项后来分别见 §8.11、§8.10）。创意工坊 VPK 解包已于同日实现（见 §8.8）。
-2026-11-14 晚做过一轮可行性验证，结论和具体做法见 **[剩余需求分析](roadmap.md)**：
+2026-11-14 晚做过一轮可行性验证，结论和具体做法见 **[需求分析与实现记录](roadmap.md)**：
 
 - 官方地图实际分布在 `left4dead2/maps`（c1–c5）、`left4dead2_dlc1/2/3/maps`（c6–c13）、`update/maps`（c14），共 57 张；
   现有查看器默认只索引 c1–c5。
