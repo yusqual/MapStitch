@@ -7,43 +7,49 @@ L4D2 跨章节地图拼接可视化工具。读取相邻两章 BSP，按 `info_l
 ![点击读坐标与 B 落点判定](docs/screenshot-check.png)
 
 完整操作说明见 **[使用手册](docs/manual.md)**；实现细节与技术结论见 [调研/实现记录](docs/research.md)；
-创意工坊 VPK 已实现，剩余 180° 旋转与 prop_static 的工作量、验证结论和设计建议见 [剩余需求分析](docs/roadmap.md)。
+剩余 180° 旋转与 prop_static 的工作量、验证结论和设计建议见 [剩余需求分析](docs/roadmap.md)。
 
 ## 快速开始
 
+日常使用只需要 `start.bat` 和网页，下面两条路任选其一。
+
+**便携包（发给别人 / 不想装 Node.js）**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File pack.ps1   # 生成 dist/MapStitch-portable-<日期>.zip
+```
+
+把 zip 发出去，对方解压后**双击 `start.bat`** 即可，无需安装 Node、无需联网。
+
+**本机开发（已装 Node 18+）**
+
 ```bash
 cd MapStitch
-npm install            # 只装 three.js（可选 lzma-native 用于创意工坊压缩图）
-
-node src/cli.js serve           # 打开 http://localhost:8123/
-# 页面左侧点「解析官方地图」后才会读取 c1–c14；serve 启动本身不解析任何地图
+npm install      # 仅首次；只装 three.js（可选 lzma-native 用于创意工坊压缩图）
+start.bat        # 或 node src/cli.js serve
 ```
 
-也可以在命令行预先解析（57 张约 3 秒）：
+启动后的一切都在页面左侧完成：
 
-```bash
-node src/cli.js build --all     # 导出 out/maps/*.mst + out/index.json
-```
+- **官方地图**：确认游戏目录（自动检测 Steam，不对可直接改并保存）→ 点「解析官方地图」读取 c1–c14；
+- **附加地图 / VPK**：勾选 addon（可多选组合多分卷）→ 点「解析并加入」。
 
-游戏目录不写死：自动从 Steam 注册表与 `libraryfolders.vdf` 查找，也支持
-`--game-dir <目录>`、`L4D2_GAME_DIR`，或直接在页面里修改并保存。
+说明：
 
-创意工坊 / addon 地图只加载选中的那一个，VPK 自动解包到 `out/cache/`。
-也可以直接在页面左侧「附加地图 / VPK」勾选并解析，无需命令行：
+- `serve` 启动**不会自动解析任何地图**，全部按需生成到 `out/`（可随时删除）；
+- 游戏目录不写死：自动从 Steam 注册表与 `libraryfolders.vdf` 查找，页面可改可存，
+  命令行可用 `--game-dir <目录>` 或 `L4D2_GAME_DIR`；
+- 服务默认只监听 `127.0.0.1`，不暴露到局域网；
+- 打包细节见 [使用手册 §11](docs/manual.md)。
 
-```bash
-node src/cli.js addons --inspect                 # 列出 addons，显示地图数与 coop 章节
-node src/cli.js build --addon "Amid The Ruins"   # 解析 missions 的 coop 顺序并加入 index
-node src/cli.js build --addon "Journey to Splash Mountain - Part 1" \
-                       --addon "Journey to Splash Mountain - Part 2"
-```
+## 页面操作
 
-## 查看器操作
-
-| 操作 | 说明 |
+| 区域 / 操作 | 说明 |
 |---|---|
+| 官方地图 | 显示检测到的游戏目录；可修改并保存；点「解析官方地图」才会读取 57 张官方图 |
+| 附加地图 / VPK | 勾选 addon 后「解析并加入」，进度与日志实时显示，完成后自动切换到新章节 |
+| 章节过渡 | 官方 43 个相邻章节对 + 已解析 addon 的章节对，切换后自动加载并重算偏移 |
 | 拖动左侧分隔条 | 调整面板宽度（双击恢复默认，自动记住） |
-| 官方地图 | 首次使用点「解析官方地图」；`serve` 启动不会自动解析 |
 | 左键拖动 | 环绕旋转 |
 | 中键拖动 | 平移 |
 | 右键拖动 | 原地自由视角（只转朝向，不移动相机） |
@@ -52,17 +58,16 @@ node src/cli.js build --addon "Journey to Splash Mountain - Part 1" \
 | `Q` / `E` | 下降 / 上升 |
 | `Shift` / `Ctrl` | 按住加速 ×2.5 / 减速 ×0.4 |
 | `F` | 重置视角 |
-
-左侧"飞行 → 速度"滑块控制基础倍率（默认 ×0.35，设置会记住）。注意浏览器会抢占
-`Ctrl+W`（关闭标签页），微调建议直接用滑块。
 | 点击表面 | 读取 A / B 两套坐标，并给出 B 落点是否为 clip / solid / 开阔空间 |
-| 章节过渡 | 选择相邻章节对（自动加载并计算偏移） |
 | 不透明度 | 分别调 A / B，把另一张图"透视"过去 |
 | 线框 | 单图线框模式 |
 | 偏移 | B 的平移量，默认 `-offset` 使 landmark 重合；可手动微调 |
 | 图层 | 世界几何 / 地形位移面 / 门实体 / clip 体积 / nodraw / 水面 / 天空盒 |
 | 坐标定位 | 输入 A 坐标放标记，适合把游戏里 `sm_printspawn` 的坐标贴进来 |
 | 剖切 | 沿 Z 轴切开，方便看楼层内部 |
+
+左侧"飞行 → 速度"滑块控制基础倍率（默认 ×0.35，设置会记住）。注意浏览器会抢占
+`Ctrl+W`（关闭标签页），微调建议直接用滑块。
 
 颜色：**蓝 = 上一章（A）**，**橙 = 下一章（B）**，黄色 = clip 体积，红棕 = nodraw。
 
@@ -74,17 +79,21 @@ B 坐标 = p - B平移量        （默认 B平移量 = -offset，即 B坐标 = 
 
 这与游戏里的换关规则 `下一章坐标 = 上一章坐标 + offset` 一致。
 
-## 命令行
+## 命令行参考
+
+页面上能完成绝大多数操作；以下命令用于脚本化或调试。游戏目录同样支持
+`--game-dir <目录>` / `L4D2_GAME_DIR`，地图目录可用 `--maps-dir <dir>`（可重复）。
 
 ```
+node src/cli.js serve [--port 8123] [--host 127.0.0.1]
+                                                 启动可视化（不自动解析任何地图）
+node src/cli.js build --all [--merge] [--force]  导出全部官方战役（c1–c14，含 DLC 目录）；
+                                                 --merge 保留 index 里已有的 addon
+node src/cli.js build --campaign c2              只导出某个战役
+node src/cli.js build c1m1_hotel c1m2_streets    只导出指定相邻两章
+node src/cli.js build --addon <vpk或目录>         解包选中 addon 并合并进 index（可重复 --addon）
 node src/cli.js pairs [campaign]                 只算偏移表（秒级，只读实体块）
 node src/cli.js pairs --addon "Amid The Ruins"   只看选中 addon 的偏移（不解包）
-node src/cli.js build --all [--merge]            导出全部官方战役（c1–c14，含 DLC 目录）
-node src/cli.js pairs c14 --game-dir <游戏目录>    指定游戏安装目录（也可用 L4D2_GAME_DIR）
-node src/cli.js build --campaign c2              只导出某个战役
-node src/cli.js build --addon <vpk或目录>         解包选中 addon 并合并进 index（可重复）
-node src/cli.js build c1m1_hotel c1m2_streets    只导出指定相邻两章
-node src/cli.js serve [--port 8123]              启动可视化
 node src/cli.js check c1m1_hotel c1m2_streets 2136 4472 1248
                                                  查一个 A 点传到 B 后落在什么体积里
 node src/cli.js info c1m1_hotel                  单图 lump / 统计信息
@@ -112,6 +121,7 @@ B 点 = A + 偏移 = (2504.0, 5128.0, 512.0):
 - `src/export.js` — `.mst` 二进制格式（JSON 头 + Float32 位置/法线 + Uint8 颜色）
 - `src/cli.js` — 命令行入口 + 静态服务器
 - `web/` — three.js 查看器（无构建步骤，importmap 直接引用 node_modules）
+- `start.bat` / `pack.ps1` — 启动脚本与便携包一键打包
 
 ### 关键技术结论（均已逐字节验证）
 

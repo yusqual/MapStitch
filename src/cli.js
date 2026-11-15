@@ -59,6 +59,7 @@ function parseArgs(argv) {
     else if (a === '--addon') opts.addons.push(argv[++i]);
     else if (a === '--out') opts.out = path.resolve(argv[++i]);
     else if (a === '--port') opts.port = Number(argv[++i]);
+    else if (a === '--host') opts.host = argv[++i];
     else if (a === '--force') opts.force = true;
     else if (a === '--merge') opts.merge = true;
     else rest.push(a);
@@ -648,6 +649,8 @@ const MIME = {
 
 function serve(opts) {
   const port = opts.port || 8123;
+  // 便携包/分发场景默认只监听本机，避免把文件服务和构建 API 暴露到局域网
+  const host = opts.host || '127.0.0.1';
   const sources = mapSourcesFromIndex(opts.out);
   const game = getGameInfo();
   if (game.root) console.log(`游戏目录: ${game.root}（${game.source}）`);
@@ -699,8 +702,9 @@ function serve(opts) {
     }
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('404');
   });
-  server.listen(port, () => {
-    console.log(`MapStitch 可视化: http://localhost:${port}/`);
+  server.listen(port, host, () => {
+    const displayHost = host === '0.0.0.0' || host === '::' ? 'localhost' : host;
+    console.log(`MapStitch 可视化: http://${displayHost}:${port}/`);
     console.log(`（数据目录 ${opts.out}）`);
   });
 }

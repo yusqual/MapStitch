@@ -285,7 +285,7 @@ node src/cli.js serve [--port 8123] [--out <dir>]
 ```
 
 `serve` 本身**不会解析任何地图**，只提供页面和 `/api/point`；官方图与 addon 都由页面按钮
-按需解析。端口被占用时换一个：
+按需解析。默认只监听 `127.0.0.1`（`--host 0.0.0.0` 可放开到局域网）。端口被占用时换一个：
 
 ```bash
 node src/cli.js serve --port 8124
@@ -403,6 +403,36 @@ MapStitch/
 │  └─ cli.js        命令行入口 + 静态服务器 + /api/point
 ├─ web/             three.js 查看器（index.html / main.js / style.css）
 ├─ tools/           check_disp.js（位移面校验）、probe_brush.js（brush 重建验证）、inspect_bsp.js
+├─ start.bat        启动脚本（便携包用；开发目录没带 node/ 时回退系统 node）
+├─ pack.ps1         一键打包便携包
 ├─ docs/            research.md（调研/实现记录）、manual.md（本手册）
 └─ out/             build 产物（maps/*.mst、index.json、cache/）
 ```
+
+## 11. 打包分发（便携包）
+
+在本机一条命令生成单文件 zip（不需要对方装 Node.js、不需要联网）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File pack.ps1
+# 自定义 node.exe / 输出位置：
+powershell -ExecutionPolicy Bypass -File pack.ps1 -NodeExe "D:\node\node.exe" -OutZip "D:\MapStitch.zip"
+```
+
+产物在 `dist/MapStitch-portable-<日期>.zip`，内容：
+
+```
+node/node.exe        # 打包时使用的 node.exe（本机 C:\Program Files\nodejs\node.exe，x64 v24）
+node_modules/        # three（已裁剪 src/examples 非运行时文件）+ 可选 lzma-native
+src/ web/ docs/ tools/ package.json README.md START-HERE.txt start.bat
+```
+
+对方解压后双击 `start.bat` 即可：自动打开页面，游戏目录由 Steam 自动检测，
+找不到时在页面里填写并保存。收到的 zip 如被 SmartScreen 拦截，右键 zip → 属性 → 勾选"解除锁定"再解压。
+
+注意：
+
+- `lzma-native` 是随打包机器的 Node ABI 编译的原生模块，便携包里已包含；
+  换 Node 大版本时需要重新打包；
+- 不要把 `out/`、`.mapstitch.json` 打进包里（pack.ps1 会自动排除）；
+- `serve` 默认只监听 `127.0.0.1`，不暴露到局域网。
