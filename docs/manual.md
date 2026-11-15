@@ -1,6 +1,6 @@
 # MapStitch 使用手册
 
-> 适用版本：MapStitch 0.1.0（2026-11-14）
+> 适用版本：MapStitch 0.1.0（2026-11-15）
 > 相关文档：[调研与实现记录](research.md) · [剩余需求分析](roadmap.md) · [项目说明](../README.md)
 
 ## 1. 这个工具解决什么问题
@@ -10,6 +10,9 @@ L4D2 换关时，角色坐标会按固定偏移搬到下一章：
 ```
 B 坐标 = A 坐标 + offset        offset = B 的 landmark - A 的 landmark
 ```
+
+少数章节（landmark 名为 `coldstream3_coldstream4`，本机 c13m3→c13m4）会额外绕 landmark
+旋转 180°，此时 `B = lmB + Rz(-yaw)·(A - lmA)`。工具会自动识别，无需手工换算。
 
 "电击器传点"利用的是：玩家卡在墙里 10 秒后会被传送到最近队友处，若队友在过关点，
 传送的同时立即结算电击器复活。玩家本体留在原地，下一章加载后其坐标被加上 offset，
@@ -138,7 +141,9 @@ node src/cli.js pairs --addon "A.vpk" --addon "B.vpk"
 ```
 
 查看器下拉框里 addon 章节会显示为「附加地图 <addon 名> · <战役 id>」；也可以直接用
-`?pair=atr01_trailer_park|atr02_outskirts` 打开。
+`?pair=atr01_trailer_park|atr02_outskirts` 打开。URL 还支持 `?yaw=180` 覆盖旋转角、
+`?pick=x,y,z` 放置 A 坐标标记、`?view=top` 俯视、`?layers=world,clip` 只开指定图层，
+便于脚本截图与复现。
 
 ## 4. 界面说明
 
@@ -150,9 +155,9 @@ node src/cli.js pairs --addon "A.vpk" --addon "B.vpk"
 | 附加地图 / VPK | 勾选 addon 后「解析并加入」，见上一节 |
 | 章节过渡 | 官方 43 个相邻章节对 + 已解析 addon 的章节对，切换后自动加载并重算偏移 |
 | 上一章 / 下一章 | 分别调不透明度与线框。把 B 调低可以"透视"到 A 的几何 |
-| 偏移 | 显示 `B - A` 的偏移量；下方 X/Y/Z 是 B 的**平移量**，默认 `-offset` |
-| 对齐 landmark | 把 B 平移回 `-offset`，两图 landmark 重合 |
-| 不平移 | B 使用原始坐标，便于核对游戏内坐标 |
+| 偏移 / 旋转 | 显示 `B - A` 的偏移量；「B 旋转」下拉可手动切 0/90/180/270°（默认按 landmark 自动识别）；下方 X/Y/Z 是 B 旋转后的**平移量** |
+| 对齐 landmark | 按当前旋转角重算平移，使两图 landmark 重合 |
+| 不平移 | B 使用原始坐标（保留旋转），便于核对游戏内坐标 |
 | 飞行 | 速度滑块：WASD 移动的基础倍率（×0.05–×2，默认 ×0.35，自动记住） |
 | 图层 | 世界几何 / 地形位移面 / 门实体 / clip 体积 / nodraw / 水面 / 天空盒 |
 | 坐标定位 | 输入 A 坐标放置黄色标记，自动显示 B 坐标与落点判定 |
@@ -312,6 +317,9 @@ B 点 = A + 偏移 = (-1024.0, 6144.0, 448.0):
 判定: B 点落在 clip 体积内 —— 卡墙传点后大概率被卡住，可用。
 ```
 
+旋转换关（如 c13m3→c13m4）会自动按 180° 换算，输出里会多一行 `旋转 180°`；
+`--yaw 0|90|180|270` 可手动覆盖。
+
 ### `info`
 
 ```bash
@@ -332,10 +340,12 @@ node tools/check_disp.js "C:/.../left4dead2/maps"
 
 - 坐标系与游戏一致：X 东、Y 北、Z 上。
 - 设 `offset = landmark_B - landmark_A`。
-- 查看器默认把 B 平移 `-offset`，所以两张图的 landmark 完全重合；屏幕上的点 `p` 满足：
-  `B 坐标 = p - B平移量`，默认即 `B 坐标 = p + offset`。
-- 这与游戏内"下一章坐标 = 上一章坐标 + offset"完全一致。
-- 若手动改过平移量，读数面板会用当前平移量重新换算，不必手动算。
+- 普通换关：查看器默认把 B 平移 `-offset`，两张图的 landmark 完全重合；屏幕上的点 `p` 满足：
+  `B 坐标 = p - B平移量`，默认即 `B 坐标 = p + offset`，与游戏内规则一致。
+- 旋转换关（`coldstream3_coldstream4`，180°）：
+  `显示坐标 = lmA + Rz(yaw)·(B坐标 - lmB)`，反算即 `B坐标 = lmB + Rz(-yaw)·(A坐标 - lmA)`。
+  `Rz` 为绕 Z 轴逆时针旋转（与 Source 的 yaw 同向），旋转中心永远是 landmark。
+- 若手动改过旋转角或平移量，读数面板会按当前值重新换算，不必手动算。
 
 ## 8. 常见问题
 
@@ -378,8 +388,8 @@ npm install lzma-native
 ## 9. 已知限制
 
 - 不渲染 prop_static（车辆、围栏等模型只存在于 VPK 的 MDL 中，需要额外解析）；
-- 只支持平移偏移。L4D2 的 180° 旋转是 `server.dll` 里硬编码的 landmark 名 `coldstream3_coldstream4` 触发的
-  （本机 c13m3→c13m4 就是这种情况），当前查看器不会自动处理；需要时请等旋转功能或手动换算；
+- 旋转换关只自动识别 L4D2 已知的 `coldstream3_coldstream4`；其它角度需在页面下拉框或
+  `--yaw` 手动指定。旧 index 里的 addon 章节对没有 `yaw` 字段，按 0° 处理，重新解析 addon 后会更新；
 - 默认只加载用户选中的一个 addon（可重复 `--addon` 组合多分卷），不会扫描全部 addons；
 - addon 没有 missions 且 changelevel 不完整时，可能漏掉最终章或只能按名称排序兜底
   （例如 Journey to Splash Mountain Part 1 的 missions 只写到 splash5，splash6 没有换关实体）；

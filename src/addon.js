@@ -411,21 +411,23 @@ function hintLandmark(entsA, toName) {
   return '';
 }
 
-function makePair(campaign, from, to, getEntities, hint, extra = {}) {
+function makePair(campaign, from, to, getEntities, hint, extra = {}, yaw = null) {
   try {
     const ea = getEntities(from);
     const eb = getEntities(to);
     let r;
     if (hint) {
-      try { r = calcOffset(ea, eb, hint); } catch { r = calcOffset(ea, eb); }
+      try { r = calcOffset(ea, eb, hint, yaw); } catch { r = calcOffset(ea, eb, null, yaw); }
     } else {
-      r = calcOffset(ea, eb);
+      r = calcOffset(ea, eb, null, yaw);
     }
+    const { note: extraNote, ...rest } = extra;
     return {
       campaign, from: from.name, to: to.name,
-      landmark: r.landmark, offset: r.offset, note: r.note,
+      landmark: r.landmark, offset: r.offset, yaw: r.yaw,
+      note: [r.note, extraNote].filter(Boolean).join('；'),
       landmarkA: r.a, landmarkB: r.b,
-      ...extra,
+      ...rest,
     };
   } catch (e) {
     return { campaign, from: from.name, to: to.name, error: e.message, ...extra };
@@ -517,6 +519,7 @@ export function scanAddon(addon, content = openContent(addon)) {
 // Mountain Part 1 + Part 2 合起来才是 splash1–6）。只读取实体 lump，不解包整张图。
 export function analyzeAddons(specs, opts = {}) {
   const list = Array.isArray(specs) ? specs : [specs];
+  const yaw = opts.yaw ?? null;
   const parts = list.map((spec) => {
     const addon = typeof spec === 'string' ? resolveAddon(spec, opts.gameRoot) : spec;
     const content = openContent(addon);
@@ -619,7 +622,7 @@ export function analyzeAddons(specs, opts = {}) {
         pairs.push(makePair(camp.id, a, b, getEntities, hint, {
           source: derived ? 'changelevel' : 'missions',
           addon: a.part.addon.id, addonName: a.part.addon.name,
-        }));
+        }, yaw));
       }
     }
   } else {
@@ -639,7 +642,7 @@ export function analyzeAddons(specs, opts = {}) {
         pairs.push(makePair(campaign, a, b, getEntities, edge ? edge.landmark : '', {
           source, addon: a.part.addon.id, addonName: a.part.addon.name,
           note: (edge && edge.landmark) ? '' : (source === 'name-order' ? '无 missions / changelevel，按名称排序' : ''),
-        }));
+        }, yaw));
       }
     }
   }

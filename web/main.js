@@ -92,6 +92,7 @@ const state = {
   A: null,
   B: null,
   offset: [0, 0, 0],
+  yaw: 0,        // B 绕 landmark 的旋转角（度，绕 Z）
   shift: [0, 0, 0],
   pickMarker: null,
   layerVisible: new Map(),
@@ -99,6 +100,25 @@ const state = {
   clipEnabled: false,
   fitted: false,
 };
+
+// 绕 Z 轴旋转（与 Source 的 yaw 同向：逆时针为正）
+function rotZ(v, degrees) {
+  const a = (degrees * Math.PI) / 180;
+  const c = Math.cos(a), s = Math.sin(a);
+  return [v[0] * c - v[1] * s, v[0] * s + v[1] * c, v[2]];
+}
+
+// B 的默认平移：使 B 的 landmark 在旋转后落到 A 的 landmark 上。
+// 显示坐标 = Rz(yaw) * pB + shift，代入 pB = lmB 得 shift = lmA - Rz(yaw) * lmB。
+function defaultShift(pair, yaw) {
+  if (pair && pair.landmarkA && pair.landmarkB) {
+    const q = rotZ(pair.landmarkB, yaw);
+    return [pair.landmarkA[0] - q[0], pair.landmarkA[1] - q[1], pair.landmarkA[2] - q[2]];
+  }
+  // 旧 index 没有 landmark 坐标：只有纯平移时才能还原
+  const off = (pair && pair.offset) || [0, 0, 0];
+  return yaw ? [0, 0, 0] : [-off[0], -off[1], -off[2]];
+}
 
 // ---------- 数据加载 ----------
 
@@ -211,8 +231,14 @@ async function setPair(pair) {
     state.B = b;
     groupA.add(a.group);
     groupB.add(b.group);
-    // 默认：把 B 平移 -offset，使两图 landmark 重合
-    setShift([-state.offset[0], -state.offset[1], -state.offset[2]], true);
+    // 默认：按 pair 的 yaw 旋转 B，并平移使两图 landmark 重合（?yaw= 可临时覆盖）
+    const yawParam = PARAMS.get('yaw');
+    const yaw = yawParam !== null && Number.isFinite(Number(yawParam)) ? Number(yawParam) : (pair.yaw || 0);
+    groupB.rotation.z = (yaw * Math.PI) / 180;
+    state.yaw = yaw;
+    const yawSelect = document.getElementById('yawSelect');
+    if (yawSelect) yawSelect.value = String(yaw);
+    setShift(defaultShift(pair, yaw), true);
     applyTint();
     buildLayerToggles();
     buildMarkers();
@@ -404,14 +430,18 @@ function updatePairInfo() {
   if (p.error) {
     info.innerHTML = `<b>偏移计算失败</b>\n${p.error}`;
   } else {
+    const auto = p.yaw ? `  <span class="dim">（landmark 自动识别 ${p.yaw}°）</span>` : '';
     info.innerHTML =
       `landmark: <b>${p.landmark}</b>` +
       (p.note ? `\n<span class="dim">${p.note}</span>` : '') +
+      `\n旋转: <b>${state.yaw}°</b>${state.yaw === (p.yaw || 0) ? auto : ''}` +
       `\n偏移 B-A: <b>${fmt(p.offset)}</b>`;
   }
-  document.getElementById('offsetInfo').innerHTML =
-    `B 平移: <b>${fmt(state.shift)}</b>\n` +
-    `对齐后 A 坐标 = B 坐标 - 偏移`;
+  document.getElementById('offsetInfo').innerHTML = state.yaw
+    ? `B 旋转 <b>${state.yaw}°</b>，平移 <b>${fmt(state.shift)}</b>\n` +
+      `A 坐标 = lmA + Rz(${state.yaw}°) · (B 坐标 - lmB)`
+    : `B 平移: <b>${fmt(state.shift)}</b>\n` +
+      `对齐后 A 坐标 = B 坐标 - 偏移`;
   updateOffsetInputs();
 }
 
@@ -423,8 +453,17 @@ function updateOffsetInputs() {
 
 const btnAlign = document.getElementById('alignBtn');
 const btnZero = document.getElementById('zeroBtn');
-btnAlign.onclick = () => setShift([-state.offset[0], -state.offset[1], -state.offset[2]], true);
+btnAlign.onclick = () => setShift(defaultShift(state.pair, state.yaw), true);
 btnZero.onclick = () => setShift([0, 0, 0], true);
+
+// 手动旋转（0/90/180/270）。切换时按 landmark 重新对齐。
+document.getElementById('yawSelect').addEventListener('change', (e) => {
+  const yaw = Number(e.target.value) || 0;
+  state.yaw = yaw;
+  groupB.rotation.z = (yaw * Math.PI) / 180;
+  setShift(defaultShift(state.pair, yaw), true);
+  updatePairInfo();
+});
 
 for (const id of ['shiftX', 'shiftY', 'shiftZ']) {
   document.getElementById(id).addEventListener('change', () => {
@@ -474,15 +513,20 @@ function updateClipInfo() {
 
 function combinedBounds() {
   const box = new THREE.Box3();
-  const add = (mins, maxs, shift) => {
-    const b = new THREE.Box3(
-      new THREE.Vector3(mins[0] + shift[0], mins[1] + shift[1], mins[2] + shift[2]),
-      new THREE.Vector3(maxs[0] + shift[0], maxs[1] + shift[1], maxs[2] + shift[2]),
-    );
+  const localBox = (mins, maxs) => new THREE.Box3(
+    new THREE.Vector3(mins[0], mins[1], mins[2]),
+    new THREE.Vector3(maxs[0], maxs[1], maxs[2]),
+  );
+  if (state.A) box.union(localBox(state.A.header.bounds.mins, state.A.header.bounds.maxs));
+  if (state.B) {
+    // B 先绕 Z 旋转再平移（与 groupB 的变换一致）
+    const b = localBox(state.B.header.bounds.mins, state.B.header.bounds.maxs);
+    const m = new THREE.Matrix4()
+      .makeRotationZ((state.yaw * Math.PI) / 180)
+      .setPosition(state.shift[0], state.shift[1], state.shift[2]);
+    b.applyMatrix4(m);
     box.union(b);
-  };
-  if (state.A) add(state.A.header.bounds.mins, state.A.header.bounds.maxs, [0, 0, 0]);
-  if (state.B) add(state.B.header.bounds.mins, state.B.header.bounds.maxs, state.shift);
+  }
   return box;
 }
 
@@ -737,13 +781,17 @@ document.getElementById('locBtn').addEventListener('click', () => {
 });
 
 async function showReadout(p, layer) {
-  const shiftB = new THREE.Vector3().fromArray(state.shift);
-  const bLocal = p.clone().sub(shiftB);
+  // 反变换：显示坐标 = Rz(yaw) * B坐标 + 平移  =>  B坐标 = Rz(-yaw) * (显示坐标 - 平移)
+  const d = [p.x - state.shift[0], p.y - state.shift[1], p.z - state.shift[2]];
+  const q = rotZ(d, -state.yaw);
+  const bLocal = new THREE.Vector3(q[0], q[1], q[2]);
   const base = [
     `<span class="dim">图层:</span> ${LAYER_LABEL[layer] || layer}`,
     `<span class="a">A 坐标:</span> ${fmt([p.x, p.y, p.z])}`,
     `<span class="b">B 坐标:</span> ${fmt([bLocal.x, bLocal.y, bLocal.z])}`,
-    `<span class="dim">B 落点 = A 坐标 + 偏移</span>`,
+    state.yaw
+      ? `<span class="dim">B 坐标 = lmB + Rz(-${state.yaw}°) · (A 坐标 - lmA)</span>`
+      : `<span class="dim">B 落点 = A 坐标 + 偏移</span>`,
   ].join('\n');
   readoutEl.classList.remove('hidden');
   readoutEl.innerHTML = base;
@@ -1196,7 +1244,7 @@ function fillPairSelect() {
     for (const p of pairs) {
       const opt = document.createElement('option');
       opt.value = `${p.from}|${p.to}`;
-      opt.textContent = `${p.from}  →  ${p.to}${p.error ? '  (偏移失败)' : ''}`;
+      opt.textContent = `${p.from}  →  ${p.to}${p.yaw ? `  (旋转 ${p.yaw}°)` : ''}${p.error ? '  (偏移失败)' : ''}`;
       og.appendChild(opt);
     }
     pairSelect.appendChild(og);

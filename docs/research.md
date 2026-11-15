@@ -258,3 +258,26 @@ DOM 里的 `.marker-label` 因而一直保留并累积。
   `left4dead2` 或 `left4dead2/maps` 三种写法；保存后需再点一次解析官方地图。
 - **无 index 启动**：`index.json` 不存在时页面不再报错，而是显示“尚未解析地图”，
   官方按钮与 addon 列表仍可用（用临时 `--out` 目录实测）。
+
+### 8.10 旋转换关（2026-11-15）
+
+L4D2 的旋转换关由 landmark 名 `coldstream3_coldstream4` 触发（`server.dll` 硬编码，
+见 [roadmap.md §3](roadmap.md)），本机用例 c13m3→c13m4。实现把旋转统一成 landmark 变换：
+
+```
+显示坐标（A 空间） = lmA + Rz(yaw) · (pB - lmB)
+B 坐标（游戏规则） = lmB + Rz(-yaw) · (pA - lmA)
+```
+
+- **自动识别**：`landmarkYaw()` 精确匹配 landmark 名（大小写不敏感）返回 180，否则 0；
+  `calcOffset()` 把 `yaw` 写进 index 的章节对（`pairs` / `build`），并支持 `--yaw` 手动覆盖。
+- **查看器**：`groupB.rotation.z = yaw`、`groupB.position = lmA - Rz(yaw)·lmB`；
+  点击读数与 `?pick=` 用反变换 `Rz(-yaw)·(显示点 - 平移)`；包围盒按旋转后的 B 计算；
+  新增 0/90/180/270° 下拉与 `?yaw=` URL 参数。
+- **CLI `check`**：`aToB()` 在 yaw=0 时退化为 `A + offset`，旋转时按上式换算，
+  因此同一套点位筛选流程对 c13m3→c13m4 直接可用。
+- **验证**：`pairs c13` 自动标注 180°；`check` 输入 A 的 landmark 得到 B 的 landmark；
+  headless Edge 对比截图显示 0° 时过渡区脱节、180° 时连续；c1m1→c1m2 平移读数不变。
+- **注意**：几何接缝不能用来*检测*旋转（roadmap §3.3 已验证不可靠），检测只依赖精确
+  landmark 名 + 手动覆盖；旧 index 中的 addon 章节对需重新解析才会写入 `yaw` 字段
+  （缺省按 0 处理）。

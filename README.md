@@ -61,7 +61,7 @@ start.bat        # 或 node src/cli.js serve
 | 点击表面 | 读取 A / B 两套坐标，并给出 B 落点是否为 clip / solid / 开阔空间 |
 | 不透明度 | 分别调 A / B，把另一张图"透视"过去 |
 | 线框 | 单图线框模式 |
-| 偏移 | B 的平移量，默认 `-offset` 使 landmark 重合；可手动微调 |
+| 偏移 / 旋转 | B 的旋转角（0/90/180/270°）与平移量；默认按 landmark 自动识别旋转并使 landmark 重合，可手动微调 |
 | 图层 | 世界几何 / 地形位移面 / 门实体 / clip 体积 / nodraw / 水面 / 天空盒 |
 | 坐标定位 | 输入 A 坐标放标记，适合把游戏里 `sm_printspawn` 的坐标贴进来 |
 | 剖切 | 沿 Z 轴切开，方便看楼层内部 |
@@ -71,7 +71,7 @@ start.bat        # 或 node src/cli.js serve
 
 颜色：**蓝 = 上一章（A）**，**橙 = 下一章（B）**，黄色 = clip 体积，红棕 = nodraw。
 
-坐标约定与游戏一致：X 东、Y 北、Z 上。B 的几何默认平移 `-offset`，因此 landmark 处两图重合；此时显示的任一点 `p` 满足：
+坐标约定与游戏一致：X 东、Y 北、Z 上。普通换关的 B 几何默认平移 `-offset`，因此 landmark 处两图重合；此时显示的任一点 `p` 满足：
 
 ```
 B 坐标 = p - B平移量        （默认 B平移量 = -offset，即 B坐标 = p + offset）
@@ -79,10 +79,20 @@ B 坐标 = p - B平移量        （默认 B平移量 = -offset，即 B坐标 = 
 
 这与游戏里的换关规则 `下一章坐标 = 上一章坐标 + offset` 一致。
 
+旋转换关（L4D2 的 landmark 名 `coldstream3_coldstream4`，本机 c13m3→c13m4）会按 180° 旋转叠放：B 先绕 Z 轴旋转 yaw，再平移，使 landmark 重合：
+
+```
+显示坐标 = lmA + Rz(yaw) · (B 坐标 - lmB)
+B 坐标   = lmB + Rz(-yaw) · (A 坐标 - lmA)
+```
+
+查看器会自动识别这个 landmark 并设好旋转，也可在「偏移 / 旋转」里手动切 0/90/180/270°。
+
 ## 命令行参考
 
 页面上能完成绝大多数操作；以下命令用于脚本化或调试。游戏目录同样支持
 `--game-dir <目录>` / `L4D2_GAME_DIR`，地图目录可用 `--maps-dir <dir>`（可重复）。
+旋转换关默认按 landmark 名自动识别，`--yaw 0|90|180|270` 可手动覆盖（`pairs` / `build` / `check` 均可用）。
 
 ```
 node src/cli.js serve [--port 8123] [--host 127.0.0.1]
@@ -92,10 +102,10 @@ node src/cli.js build --all [--merge] [--force]  导出全部官方战役（c1�
 node src/cli.js build --campaign c2              只导出某个战役
 node src/cli.js build c1m1_hotel c1m2_streets    只导出指定相邻两章
 node src/cli.js build --addon <vpk或目录>         解包选中 addon 并合并进 index（可重复 --addon）
-node src/cli.js pairs [campaign]                 只算偏移表（秒级，只读实体块）
+node src/cli.js pairs [campaign]                 只算偏移表（秒级，只读实体块；旋转换关会标出角度）
 node src/cli.js pairs --addon "Amid The Ruins"   只看选中 addon 的偏移（不解包）
 node src/cli.js check c1m1_hotel c1m2_streets 2136 4472 1248
-                                                 查一个 A 点传到 B 后落在什么体积里
+                                                 查一个 A 点传到 B 后落在什么体积里（自动处理旋转换关）
 node src/cli.js info c1m1_hotel                  单图 lump / 统计信息
 node src/cli.js addons [filter] [--inspect]      列出 addons / 创意工坊内容
 node src/cli.js vpk <file.vpk> [prefix] [--missions]
@@ -136,6 +146,8 @@ B 点 = A + 偏移 = (2504.0, 5128.0, 512.0):
    brush 内部 = 对所有侧面满足 `dot(n, p) - d <= 0`。brush→model 归属通过对每个 model 的 BSP 树遍历叶节点得到。
 4. brush 实体模型的顶点/平面是**相对实体 origin 的局部坐标**，渲染和点查询都要加回 origin。
 5. 材质名在 `TEXDATA` + `TEXDATA_STRING_TABLE/DATA`；`dtexinfo_t` 72 字节，texdata 索引在 +68。
+6. 旋转换关由 landmark 名 `coldstream3_coldstream4` 触发（`server.dll` 里的硬编码字符串），
+   角度 180°，变换中心是 landmark；不是通用的 `地图A_地图B` 规则。
 
 ### 已知限制
 
@@ -143,6 +155,6 @@ B 点 = A + 偏移 = (2504.0, 5128.0, 512.0):
 - 创意工坊图的几何可能 LZMA 压缩，需要 `lzma-native`；`.bsp` 已由 `--addon` 自动解包。
 - 默认只加载选中的一个 addon；多分卷 addon 用重复 `--addon` 组合。不会扫描全部 addons。
 - addon 无 missions 且 changelevel 不完整时，最终章可能缺失或只能按名称排序兜底。
-- 只处理平移偏移。180° 旋转由 L4D2 硬编码的 landmark 名 `coldstream3_coldstream4` 触发
-  （本机 c13m3→c13m4），当前未处理。
+- 旋转换关只识别 L4D2 已知的 `coldstream3_coldstream4`；其它角度需在页面或命令行
+  `--yaw` 手动指定（旧 index 里的 addon 章节对需重新解析才会带上自动识别的角度）。
 - 位移面朝向规则在个别重叠/重复 brush 面上会出现"伪相邻"，不影响整体显示。

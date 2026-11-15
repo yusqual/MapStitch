@@ -14,6 +14,7 @@
 //   node src/cli.js vpk <file> [prefix]     列出 VPK 目录树（验证 preload/分卷）
 //
 // 选项：--game-dir <dir>  --maps-dir <dir>（可重复）  --addon <spec>（可重复）
+//       --yaw <0|90|180|270>（手动覆盖旋转换关；默认按 landmark 名自动判断）
 //       --out <dir>  --force  --merge（build --all 时与已有 index 合并）
 // 游戏目录默认从 Steam 注册表/库目录自动检测，也可用 L4D2_GAME_DIR 覆盖。
 
@@ -27,7 +28,7 @@ import { loadBsp } from './bsp.js';
 import { extractMap, TINTS } from './geometry.js';
 import { writeMst, readMstHeader } from './export.js';
 import {
-  officialMapsDirs, resolveMap, calcOffset,
+  officialMapsDirs, resolveMap, calcOffset, aToB,
 } from './offset.js';
 import {
   listAddons, resolveAddon, openContent, scanAddon, parseMissionsText, listOfficialPairs,
@@ -50,6 +51,7 @@ function parseArgs(argv) {
     force: false,
     merge: false,
     gameRoot: '',
+    yaw: null,
   };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
@@ -60,6 +62,7 @@ function parseArgs(argv) {
     else if (a === '--out') opts.out = path.resolve(argv[++i]);
     else if (a === '--port') opts.port = Number(argv[++i]);
     else if (a === '--host') opts.host = argv[++i];
+    else if (a === '--yaw') opts.yaw = Number(argv[++i]);
     else if (a === '--force') opts.force = true;
     else if (a === '--merge') opts.merge = true;
     else rest.push(a);
@@ -92,7 +95,11 @@ function printPairRows(rows) {
   for (const r of rows) {
     const tag = `${r.from} -> ${r.to}`;
     if (r.error) console.log(`${String(r.campaign).padEnd(5)} ${tag.padEnd(46)} 失败: ${r.error}`);
-    else console.log(`${String(r.campaign).padEnd(5)} ${tag.padEnd(46)} ${String(r.landmark).padEnd(21)} ${fmtVec(r.offset)}${r.note ? '  [' + r.note + ']' : ''}`);
+    else {
+      const rot = r.yaw ? `  旋转 ${r.yaw}°` : '';
+      const note = r.note ? `  [${r.note}]` : '';
+      console.log(`${String(r.campaign).padEnd(5)} ${tag.padEnd(46)} ${String(r.landmark).padEnd(21)} ${fmtVec(r.offset)}${rot}${note}`);
+    }
   }
 }
 
@@ -116,7 +123,7 @@ function reportPairs(rest, opts) {
     try {
       const bspA = loadBsp(resolveMap(p.from, opts.mapsDir));
       const bspB = loadBsp(resolveMap(p.to, opts.mapsDir));
-      const r = calcOffset(bspA.entities, bspB.entities, p.landmark);
+      const r = calcOffset(bspA.entities, bspB.entities, p.landmark, opts.yaw);
       rows.push({ ...p, ...r });
     } catch (e) {
       rows.push({ ...p, error: e.message });
@@ -198,10 +205,10 @@ function buildAll(pairs, opts, { merge = true, mapFiles = {}, mapMeta = {}, extr
       const fileB = mapFiles[p.to] || resolveMap(p.to, opts.mapsDir);
       const bspA = loadBsp(fileA);
       const bspB = loadBsp(fileB);
-      const r = calcOffset(bspA.entities, bspB.entities, p.landmark);
+      const r = calcOffset(bspA.entities, bspB.entities, p.landmark, opts.yaw);
       pairRows.push({
         campaign: p.campaign, from: p.from, to: p.to,
-        landmark: r.landmark, offset: r.offset, note: r.note,
+        landmark: r.landmark, offset: r.offset, yaw: r.yaw, note: r.note,
         landmarkA: r.a, landmarkB: r.b,
         source: p.source,
       });
@@ -804,13 +811,15 @@ function checkPoint(rest, opts) {
   const pA = [Number(x), Number(y), Number(z)];
   const bspA = loadBsp(resolveMapWithIndex(fromName, opts));
   const bspB = loadBsp(resolveMapWithIndex(toName, opts));
-  const r = calcOffset(bspA.entities, bspB.entities);
-  const pB = [pA[0] + r.offset[0], pA[1] + r.offset[1], pA[2] + r.offset[2]];
+  const r = calcOffset(bspA.entities, bspB.entities, null, opts.yaw);
+  const pB = aToB(pA, r);
 
-  console.log(`landmark ${r.landmark}  偏移 (B - A) = ${fmtVec(r.offset)}`);
+  console.log(`landmark ${r.landmark}  偏移 (B - A) = ${fmtVec(r.offset)}${r.yaw ? `  旋转 ${r.yaw}°` : ''}`);
   console.log(`\nA 点 ${fmtVec(pA)}:`);
   console.log(describeBrushes(brushesAtPoint(bspA, pA)));
-  console.log(`\nB 点 = A + 偏移 = ${fmtVec(pB)}:`);
+  console.log(r.yaw
+    ? `\nB 点 = lmB + Rz(-${r.yaw}°) * (A - lmA) = ${fmtVec(pB)}:`
+    : `\nB 点 = A + 偏移 = ${fmtVec(pB)}:`);
   const hits = brushesAtPoint(bspB, pB);
   console.log(describeBrushes(hits));
   const clip = hits.filter((h) => h.kind === 'clip');
