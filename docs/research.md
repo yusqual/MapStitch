@@ -188,6 +188,7 @@ CDP 实测：中键拖动使 camera 与 target 同步移动；右键拖动 camer
 | `view=top` | 俯视 |
 | `cam=x,y,z` / `target=x,y,z` | 相机位置 / 注视点 |
 | `pick=x,y,z` | 按 A 坐标放置标记并触发落点判定 |
+| `depth=1` | 静态道具按深度遮挡（默认关闭 = 始终画在最上层） |
 
 **已修 Bug：切换章节后旧 landmark 标签残留。**
 原因：`disposeGroup(groupA)` 只 `clear()` 了 `groupA` 的直接子节点（地图容器 group），
@@ -206,6 +207,13 @@ props 层与 world 层的先后顺序会翻转——world 后画就会盖住 pro
 water 40、clip 80、props 90），B 的“后画”改为每层 `×2 + 1` 表达；拾取/出生点标记
 提高到 200，保证永远在最上层。
 验证：同一相机位置朝三个方向截图，props 均稳定可见；标记与读数不受影响。
+
+随后增加「静态道具按深度遮挡」开关（URL `?depth=1`），两种模式并存：
+在世界颜色层之后、clip/props 之前，用 `colorWrite:false, depthWrite:true` 的影子
+网格把 world/disp/detail/nodraw 的深度写进深度缓冲。这样 props 会被墙/地板正确
+遮挡，而 A/B 的颜色层早已画完，互相透视不受影响；clip 在该模式下强制
+`depthTest:false`，仍保持覆盖层（它本来就嵌在墙里）。影子几何与原网格共享
+BufferGeometry，不额外占显存；Z 剖切会同时作用于影子网格。
 
 ### 8.7 位移面接缝回归数据
 

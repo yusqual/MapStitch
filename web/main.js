@@ -28,6 +28,10 @@ const LAYER_OPACITY = { clip: 0.5, water: 0.72, sky: 0.3, nodraw: 0.8, props: 0.
 const LAYER_DRAW_ORDER = {
   sky: 0, world: 10, disp: 11, detail: 20, nodraw: 30, water: 40, clip: 80, props: 90,
 };
+// 深度遮挡模式：用只写深度、不写颜色的影子网格，在世界颜色层之后、props 之前
+// 把世界几何的深度写进深度缓冲（不动颜色层，A/B 互相透视不受影响）。
+const DEPTH_OCCLUDER_LAYERS = new Set(['world', 'disp', 'detail', 'nodraw']);
+const OCCLUDER_DRAW_ORDER = 70;
 
 const view = document.getElementById('view');
 const loadingEl = document.getElementById('loading');
@@ -104,8 +108,11 @@ const state = {
   layerVisible: new Map(),
   showSpawns: true,
   clipEnabled: false,
+  depthMode: PARAMS.get('depth') === '1',
   fitted: false,
 };
+// 自动化测试/调试用（CDP 里读 state.depthMode 等）
+window.__mapstitch.state = state;
 
 // 绕 Z 轴旋转（与 Source 的 yaw 同向：逆时针为正）
 function rotZ(v, degrees) {
@@ -248,7 +255,10 @@ async function setPair(pair) {
     applyTint();
     applyDrawOrder('A');
     applyDrawOrder('B');
+    buildDepthProxies('A');
+    buildDepthProxies('B');
     buildLayerToggles();
+    applyDepthMode();
     buildMarkers();
     setOpacity('A', Number(document.getElementById('opacityA').value));
     setOpacity('B', Number(document.getElementById('opacityB').value));
@@ -312,6 +322,55 @@ function setWireframe(which, on) {
   }
 }
 
+// 每个遮挡层生成一个只写深度的影子网格（几何共享，不占额外显存）。
+// 绘制顺序在颜色层之后、clip/props 之前，打开后才可见。
+function buildDepthProxies(which) {
+  const m = state[which];
+  if (!m) return;
+  const side = which === 'B' ? 1 : 0;
+  m.depthProxies = [];
+  for (const [name, mesh] of m.layers) {
+    if (!DEPTH_OCCLUDER_LAYERS.has(name)) continue;
+    const material = new THREE.MeshBasicMaterial({
+      colorWrite: false,
+      depthWrite: true,
+      depthTest: true,
+      side: THREE.DoubleSide,
+      transparent: true,
+    });
+    const proxy = new THREE.Mesh(mesh.geometry, material);
+    proxy.renderOrder = OCCLUDER_DRAW_ORDER * 2 + side;
+    proxy.userData.source = mesh;
+    proxy.visible = false;
+    m.group.add(proxy);
+    m.depthProxies.push(proxy);
+  }
+}
+
+// 只有 props 层可见时才需要深度影子；clip 始终是覆盖层。
+function depthActive() {
+  return state.depthMode && state.layerVisible.get('props') !== false;
+}
+
+// 深度遮挡模式：props 被世界几何挡住；clip 仍保持盖在最上层（它本来就嵌在墙里）。
+function applyDepthMode() {
+  const on = state.depthMode;
+  for (const key of ['A', 'B']) {
+    const m = state[key];
+    if (!m) continue;
+    const clip = m.layers.get('clip');
+    if (clip) {
+      clip.material.depthTest = !on;
+      clip.material.needsUpdate = true;
+    }
+    for (const proxy of m.depthProxies || []) {
+      proxy.visible = depthActive() && proxy.userData.source.visible;
+    }
+  }
+  const toggle = document.getElementById('propsDepth');
+  if (toggle) toggle.checked = on;
+}
+
 function allLayerNames() {
   const names = [];
   for (const m of [state.A, state.B]) {
@@ -357,6 +416,10 @@ function applyLayerVisibility() {
     if (!m) continue;
     for (const [name, mesh] of m.layers) {
       mesh.visible = state.layerVisible.get(name) !== false;
+    }
+    // 隐藏某个遮挡层时，它的深度影子也要一起隐藏
+    for (const proxy of m.depthProxies || []) {
+      proxy.visible = depthActive() && proxy.userData.source.visible;
     }
   }
 }
@@ -497,6 +560,10 @@ document.getElementById('opacityA').addEventListener('input', (e) => setOpacity(
 document.getElementById('opacityB').addEventListener('input', (e) => setOpacity('B', Number(e.target.value)));
 document.getElementById('wireA').addEventListener('change', (e) => setWireframe('A', e.target.checked));
 document.getElementById('wireB').addEventListener('change', (e) => setWireframe('B', e.target.checked));
+document.getElementById('propsDepth').addEventListener('change', (e) => {
+  state.depthMode = e.target.checked;
+  applyDepthMode();
+});
 
 // 剖切
 const clipEnabled = document.getElementById('clipEnabled');
@@ -509,6 +576,11 @@ function applyClip() {
     for (const mesh of m.layers.values()) {
       mesh.material.clippingPlanes = state.clipEnabled ? [clipPlane] : [];
       mesh.material.needsUpdate = true;
+    }
+    // 深度影子也要参与剖切，否则切口以上的几何仍会挡住 props
+    for (const proxy of m.depthProxies || []) {
+      proxy.material.clippingPlanes = state.clipEnabled ? [clipPlane] : [];
+      proxy.material.needsUpdate = true;
     }
   }
 }
