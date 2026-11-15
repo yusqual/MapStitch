@@ -110,7 +110,7 @@
     <section>
       <h2>图层</h2>
       <div id="layerToggles" class="layers"></div>
-      <label class="chk" title="开启后被世界几何挡住（更自然）；关闭时静态道具始终画在最上层（可隔墙看到）"><input type="checkbox" id="propsDepth" /> 静态道具按深度遮挡</label>
+      <label class="chk" title="开启后被世界几何挡住（更自然）；关闭时静态道具始终画在最上层（可隔墙看到）"><input type="checkbox" id="propsDepth" checked /> 静态道具按深度遮挡</label>
       <label class="chk"><input type="checkbox" id="showSpawns" checked /> 出生点 / landmark</label>
     </section>
 
@@ -128,8 +128,10 @@
 
     <section>
       <h2>剖切</h2>
-      <label class="chk"><input type="checkbox" id="clipEnabled" /> 启用 Z 剖切</label>
+      <label class="chk"><input type="checkbox" id="clipEnabled" /> 只显示 Z ≤ 阈值（上往下切）</label>
       <label class="field row"><span>Z ≤</span><input type="range" id="clipZ" min="-3000" max="4000" step="8" value="4000" /></label>
+      <label class="chk"><input type="checkbox" id="clipLowEnabled" /> 只显示 Z ≥ 阈值（下往上切）</label>
+      <label class="field row"><span>Z ≥</span><input type="range" id="clipZLow" min="-3000" max="4000" step="8" value="-3000" /></label>
       <div class="info" id="clipInfo"></div>
     </section>
 

@@ -94,7 +94,9 @@ grid.rotation.x = Math.PI / 2;
 grid.position.z = -1000;
 scene.add(grid);
 
+// 剖切：clipPlane 保留 Z ≤ constant；clipPlaneLow 保留 Z ≥ -constant
 const clipPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 100000);
+const clipPlaneLow = new THREE.Plane(new THREE.Vector3(0, 0, 1), 3000);
 
 const state = {
   index: null,
@@ -108,7 +110,8 @@ const state = {
   layerVisible: new Map(),
   showSpawns: true,
   clipEnabled: false,
-  depthMode: PARAMS.get('depth') === '1',
+  clipLowEnabled: false,
+  depthMode: PARAMS.get('depth') !== '0',
   fitted: false,
 };
 // 自动化测试/调试用（CDP 里读 state.depthMode 等）
@@ -568,18 +571,25 @@ document.getElementById('propsDepth').addEventListener('change', (e) => {
 // 剖切
 const clipEnabled = document.getElementById('clipEnabled');
 const clipZ = document.getElementById('clipZ');
+const clipLowEnabled = document.getElementById('clipLowEnabled');
+const clipZLow = document.getElementById('clipZLow');
+clipPlane.constant = Number(clipZ.value);
+clipPlaneLow.constant = -Number(clipZLow.value);
 
 function applyClip() {
+  const planes = [];
+  if (state.clipEnabled) planes.push(clipPlane);
+  if (state.clipLowEnabled) planes.push(clipPlaneLow);
   for (const key of ['A', 'B']) {
     const m = state[key];
     if (!m) continue;
     for (const mesh of m.layers.values()) {
-      mesh.material.clippingPlanes = state.clipEnabled ? [clipPlane] : [];
+      mesh.material.clippingPlanes = planes;
       mesh.material.needsUpdate = true;
     }
     // 深度影子也要参与剖切，否则切口以上的几何仍会挡住 props
     for (const proxy of m.depthProxies || []) {
-      proxy.material.clippingPlanes = state.clipEnabled ? [clipPlane] : [];
+      proxy.material.clippingPlanes = planes;
       proxy.material.needsUpdate = true;
     }
   }
@@ -594,9 +604,23 @@ clipZ.addEventListener('input', () => {
   clipPlane.constant = Number(clipZ.value);
   updateClipInfo();
 });
+// 下界：保留 Z ≥ 阈值，与上界可同时使用
+clipLowEnabled.addEventListener('change', () => {
+  state.clipLowEnabled = clipLowEnabled.checked;
+  applyClip();
+  updateClipInfo();
+});
+clipZLow.addEventListener('input', () => {
+  clipPlaneLow.constant = -Number(clipZLow.value);
+  updateClipInfo();
+});
 function updateClipInfo() {
-  document.getElementById('clipInfo').textContent =
-    state.clipEnabled ? `只显示 Z ≤ ${Number(clipZ.value).toFixed(0)} 的部分` : '未启用';
+  const parts = [];
+  if (state.clipEnabled) parts.push(`Z ≤ ${Number(clipZ.value).toFixed(0)}`);
+  if (state.clipLowEnabled) parts.push(`Z ≥ ${Number(clipZLow.value).toFixed(0)}`);
+  document.getElementById('clipInfo').textContent = parts.length
+    ? `只显示 ${parts.join(' 且 ')} 的部分`
+    : '未启用';
 }
 
 // ---------- 视角 ----------
@@ -636,8 +660,12 @@ function fitView() {
   // 剖切滑块范围
   clipZ.min = Math.floor(box.min.z - 128);
   clipZ.max = Math.ceil(box.max.z + 128);
+  clipZLow.min = clipZ.min;
+  clipZLow.max = clipZ.max;
   if (!state.clipEnabled) clipZ.value = clipZ.max;
+  if (!state.clipLowEnabled) clipZLow.value = clipZLow.min;
   clipPlane.constant = Number(clipZ.value);
+  clipPlaneLow.constant = -Number(clipZLow.value);
   updateClipInfo();
   // 网格高度
   grid.position.z = Math.floor(box.min.z / 64) * 64 - 8;
