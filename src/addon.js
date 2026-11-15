@@ -311,6 +311,14 @@ class VpkContent {
     return entitiesFromHeader(head, (o, l) => this.vpk.readRange(map.entry, o, l), label);
   }
 
+  // 读 addon 内的任意逻辑文件（prop_static 的模型等），只读前 maxBytes 字节时不必解出整文件。
+  readFile(logicalPath, maxBytes = Infinity) {
+    const entry = this.vpk.find(logicalPath);
+    if (!entry) return null;
+    const n = Math.min(maxBytes, entry.size);
+    return n > 0 ? this.vpk.readRange(entry, 0, n) : Buffer.alloc(0);
+  }
+
   extractMap(map, destFile) {
     const { entry } = map;
     const { vpk } = this;
@@ -388,6 +396,33 @@ class DirContent {
   }
 
   extractMap(map) { return map.file; }
+
+  // 与 VpkContent.readFile 同语义：先按原路径找，找不到再用大小写不敏感的索引。
+  readFile(logicalPath, maxBytes = Infinity) {
+    const rel = String(logicalPath).replace(/\\/g, '/');
+    const direct = path.join(this.root, ...rel.split('/'));
+    const file = fs.existsSync(direct) ? direct : this._fileIndex().get(rel.toLowerCase());
+    if (!file) return null;
+    const size = fs.statSync(file).size;
+    const n = Math.min(maxBytes, size);
+    const buf = Buffer.alloc(n > 0 ? n : 0);
+    if (n > 0) {
+      const fd = fs.openSync(file, 'r');
+      try { fs.readSync(fd, buf, 0, n, 0); } finally { fs.closeSync(fd); }
+    }
+    return buf;
+  }
+
+  _fileIndex() {
+    if (!this._files) {
+      this._files = new Map();
+      for (const f of walkFiles(this.root, /./)) {
+        const rel = path.relative(this.root, f).replace(/\\/g, '/');
+        if (!this._files.has(rel.toLowerCase())) this._files.set(rel.toLowerCase(), f);
+      }
+    }
+    return this._files;
+  }
 
   fingerprint() {
     return [this.addon.source];

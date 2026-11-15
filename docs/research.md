@@ -147,7 +147,7 @@ brush→model 归属用每个 dmodel 的 BSP 树遍历叶节点（NODES/LEAFS/LE
 
 ### 8.5 未做
 
-prop_static 包围盒、180° 旋转换关。创意工坊 VPK 解包已于同日实现（见 §8.8）。
+prop_static 包围盒、180° 旋转换关（这两项后来分别见 §8.11、§8.10）。创意工坊 VPK 解包已于同日实现（见 §8.8）。
 2026-11-14 晚做过一轮可行性验证，结论和具体做法见 **[剩余需求分析](roadmap.md)**：
 
 - 官方地图实际分布在 `left4dead2/maps`（c1–c5）、`left4dead2_dlc1/2/3/maps`（c6–c13）、`update/maps`（c14），共 57 张；
@@ -281,3 +281,23 @@ B 坐标（游戏规则） = lmB + Rz(-yaw) · (pA - lmA)
 - **注意**：几何接缝不能用来*检测*旋转（roadmap §3.3 已验证不可靠），检测只依赖精确
   landmark 名 + 手动覆盖；旧 index 中的 addon 章节对需重新解析才会写入 `yaw` 字段
   （缺省按 0 处理）。
+
+### 8.11 prop_static 包围盒（2026-11-15）
+
+新增 `src/props.js`，把 `GAME_LUMP` 里的 `prps` 与 VPK/目录中的 MDL 结合，输出绿色包围盒图层。
+数据细节与工作量见 [roadmap.md §4.5](roadmap.md)。
+
+- **`prps`**：`GAME_LUMP` 头是 `int lumpCount; dgamelump_t[16 B]`（ID/版本/fileofs/filelen），
+  `fileofs` 是 BSP 绝对偏移；v9 的 `StaticPropLump_t` 为 72 字节，
+  `solid` 在 **+30**、`flags` 在 **+31**（+26/+28 是 firstLeaf/leafCount，早先文档记错）。
+- **MDL**：studiohdr 前 160 字节即可；`hull_min/max` @104/@116，退化时用 view bbox @128/@140。
+- **模型查找**：addon（VPK/目录）→ 游戏散装文件 → `update/dlc3/dlc2/dlc1/base` 的 `pak01`；
+  `VpkContent` / `DirContent` 新增 `readFile()`，addon 模型优先。
+- **输出**：`props` 图层（每 prop 12 三角形），`stats` 写入 `propModels / propsDrawn /
+  propsMissing`；`.mst` 头版本升为 2，旧缓存自动重建。
+- **落点判定**：`propsAtPoint()` 用 `AngleMatrix` 反变换到模型局部坐标；
+  `check` 的 A/B 两个点、`/api/point` 与页面读数都会显示命中的 prop 模型。
+- **验证**：57 张官方图 `缺模型 0`；c1m1 的 1748 个 prop 全部可解析，医院床 hull
+  48.03 × 101.02 × 31.51 与 §4.2 一致；Amid The Ruins 等 addon 正常；
+  Journey to Splash Mountain / Neo Tokyo 因缺少模型包有大量 prop 被跳过（已统计）。
+- **工具**：`tools/check_props.js`（`npm run validate:props`）对账 propCount、图层顶点数与点查询。

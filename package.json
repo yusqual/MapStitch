@@ -12,7 +12,8 @@
     "serve": "node src/cli.js serve",
     "pairs": "node src/cli.js pairs",
     "check": "node src/cli.js check",
-    "validate:disp": "node tools/check_disp.js"
+    "validate:disp": "node tools/check_disp.js",
+    "validate:props": "node tools/check_props.js"
   },
   "dependencies": {
     "three": "^0.180.0"

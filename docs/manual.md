@@ -159,7 +159,7 @@ node src/cli.js pairs --addon "A.vpk" --addon "B.vpk"
 | 对齐 landmark | 按当前旋转角重算平移，使两图 landmark 重合 |
 | 不平移 | B 使用原始坐标（保留旋转），便于核对游戏内坐标 |
 | 飞行 | 速度滑块：WASD 移动的基础倍率（×0.05–×2，默认 ×0.35，自动记住） |
-| 图层 | 世界几何 / 地形位移面 / 门实体 / clip 体积 / nodraw / 水面 / 天空盒 |
+| 图层 | 世界几何 / 地形位移面 / 门实体 / 静态道具包围盒 / clip 体积 / nodraw / 水面 / 天空盒；静态道具与 clip 默认关闭 |
 | 坐标定位 | 输入 A 坐标放置黄色标记，自动显示 B 坐标与落点判定 |
 | 剖切 | 勾选后只显示 `Z ≤ 阈值` 的部分，滑块控制高度 |
 | 右上角读数 | 点击表面后显示图层、A 坐标、B 坐标、B 落点判定 |
@@ -196,6 +196,7 @@ node src/cli.js pairs --addon "A.vpk" --addon "B.vpk"
 | 蓝色 | 上一章（A）的材质色 |
 | 橙色 | 下一章（B）的材质色 |
 | 黄色（半透明） | clip 体积 —— 玩家碰撞体过不去，卡墙判断的关键 |
+| 绿色（半透明） | prop_static 包围盒（车辆、货架、家具等的 MDL 碰撞 hull） |
 | 红棕色 | nodraw 面（不可见但参与碰撞） |
 | 蓝色半透明 | 水面 |
 | 黄点 / 绿点 / 粉点 | landmark / 出生点 / changelevel 触发点 |
@@ -208,11 +209,14 @@ node src/cli.js pairs --addon "A.vpk" --addon "B.vpk"
 B 落点判定: 在 clip 体积内 #39，距面 0
 B 落点判定: 在实体几何内 #11，距面 3.2
 B 落点判定: 开阔空间
+prop 包围盒: 在 shelvinggrocery01.mdl 内 距面 1.8
 ```
 
 - **clip 体积内**：落点被碰撞体挤住，是"卡住"的理想情况；
 - **实体几何内**：落点在墙/地板内部，可能被引擎推出或卡住，需要游戏内实测；
-- **开阔空间**：会正常站立，通常不是目标点位。
+- **开阔空间**：会正常站立，通常不是目标点位；
+- **prop 包围盒**：落点在某个 `prop_static` 的 MDL 碰撞 hull 内（车辆、货架等）。
+  盒子里也可能是可站立的空间（例如货架下层），所以它只作为额外参考，不覆盖上面的 brush 判定。
 
 标记点会根据判定变色（黄 = clip，红 = solid，绿 = 开阔）。
 
@@ -320,21 +324,33 @@ B 点 = A + 偏移 = (-1024.0, 6144.0, 448.0):
 旋转换关（如 c13m3→c13m4）会自动按 180° 换算，输出里会多一行 `旋转 180°`；
 `--yaw 0|90|180|270` 可手动覆盖。
 
+A/B 两个点如果落在 `prop_static` 包围盒内，会额外输出：
+
+```
+  [prop ] shelvinggrocery01.mdl，距最近面 1.8
+```
+
+没有命中时输出“不在任何 prop_static 包围盒内”。
+
 ### `info`
 
 ```bash
 node src/cli.js info c1m1_hotel
 ```
 
-输出 BSP 版本、世界范围、面/位移/brush 数量、landmark 坐标。
+输出 BSP 版本、世界范围、面/位移/brush 数量、静态道具统计（模型种类、prps 版本、
+可解析包围盒数、缺模型数）与 landmark 坐标。
 
-### 校验位移面
+### 校验位移面 / 静态道具
 
 ```bash
 node tools/check_disp.js "C:/.../left4dead2/maps"
+node tools/check_props.js c1m1_hotel -48 5008 1184.2   # 也可 npm run validate:props -- c1m1_hotel
 ```
 
-对每张图检查相邻位移面共享边是否重合，RMS 应接近 0（少量重叠面除外）。
+第一条检查相邻位移面共享边是否重合，RMS 应接近 0（少量重叠面除外）。
+第二条对账 `prps` 的 prop 数量与 `.mst` 中 props 层的盒子数（顶点数 ÷ 36），
+并可选地做一次点查询。
 
 ## 7. 坐标与偏移的方向
 
@@ -387,7 +403,10 @@ npm install lzma-native
 
 ## 9. 已知限制
 
-- 不渲染 prop_static（车辆、围栏等模型只存在于 VPK 的 MDL 中，需要额外解析）；
+- `prop_static` 只显示 MDL 的碰撞 hull 包围盒，不渲染模型网格；包围盒内不一定是实体
+  （例如货架下层可以站人），仅作参考。部分 addon 依赖未安装的模型包，这些 prop 会被
+  跳过，`info` 与构建日志会给出“缺模型”数量；旧版本生成的 addon `.mst` 没有 props 层，
+  重新解析一次该 addon 即可；
 - 旋转换关只自动识别 L4D2 已知的 `coldstream3_coldstream4`；其它角度需在页面下拉框或
   `--yaw` 手动指定。旧 index 里的 addon 章节对没有 `yaw` 字段，按 0° 处理，重新解析 addon 后会更新；
 - 默认只加载用户选中的一个 addon（可重复 `--addon` 组合多分卷），不会扫描全部 addons；
@@ -407,6 +426,7 @@ MapStitch/
 │  ├─ vpk.js        VPK v1 读取（preload、内嵌 32767、分卷）
 │  ├─ addon.js      addon 发现、missions 解析、地图配对、解包缓存
 │  ├─ geometry.js   BSP → 分层网格（含位移面与 clip 凸多面体重建）
+│  ├─ props.js      prop_static 包围盒（prps + MDL hull + 点查询）
 │  ├─ offset.js     landmark 偏移计算 + 官方地图目录合并
 │  ├─ query.js      点是否在 brush 体积内
 │  ├─ export.js     .mst 二进制格式

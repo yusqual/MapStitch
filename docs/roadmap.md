@@ -1,7 +1,7 @@
 # 剩余需求分析与验证记录
 
-> 日期：2026-11-14（2026-11-15 补旋转实现记录）
-> 状态：**① 创意工坊 VPK、② 180° 旋转已实现**；③ prop_static 仍未实现
+> 日期：2026-11-14（2026-11-15 补旋转与 prop_static 实现记录）
+> 状态：**① 创意工坊 VPK、② 180° 旋转、③ prop_static 包围盒均已实现**
 > 相关内容：[调研与实现记录](research.md) · [使用手册](manual.md)
 
 本文记录三项待做功能的工作量、依赖、风险，以及在本机实际验证到的事实。
@@ -13,9 +13,9 @@
 |---|---:|---:|---|---|
 | ① 创意工坊 VPK 解包 + 地图发现/配对 | 300–450 行 | **0.5–1 天** | 无 | 低（**已完成**） |
 | ② 180° 旋转换关 | 100–200 行 | **0.25–0.5 天** | 无 | 低（**已完成**） |
-| ③ prop_static 包围盒 | 350–500 行 | **0.75–1.5 天** | ① 的 VPK 读取 | 中 |
+| ③ prop_static 包围盒 | 350–500 行 | **0.75–1.5 天** | ① 的 VPK 读取 | 中（**已完成**） |
 
-原本推荐顺序 **① → ② → ③**；①② 已完成，剩余 ③ 约 0.75–1.5 天（可复用 ① 的 VPK 代码）。
+原本推荐顺序 **① → ② → ③**，三项均已完成；实现细节见各节的“实现记录”。
 
 ---
 
@@ -261,15 +261,32 @@ int propCount;
 StaticPropLump_t props[propCount];   // 72 字节/条
 ```
 
-已确认的字段：
+`GAME_LUMP`（lump 35）头是 `int lumpCount; dgamelump_t[16 B]`：每条的 4 字节 ID
+就是 `"prps"`，随后 u16 flags、u16 version、i32 fileofs、i32 filelen。`fileofs`
+是 **BSP 文件内的绝对偏移**（实测 c1m1/c5m2/atr01 均满足 `rel = 4 + count×16`）；
+图被 LZMA 压缩后绝对偏移失效，但各 lump 在解压后的缓冲区里按条目顺序连续排列，
+可据此回退。
+
+`StaticPropLump_t` v9 为 72 字节，字段顺序与 Source SDK `gamebspfile.h` 一致：
 
 | 字段 | 偏移 | 说明 |
 |---|---:|---|
 | `origin` | 0 | Vector，实测世界坐标合理 |
 | `angles` | 12 | QAngle，实测 yaw 合理 |
-| `propType` | 24 | u16，取值 0..187，与 188 个模型名一一对应 |
-| `solid` / `flags` | 26 / 27 | u8 |
-| 其余字段 | 28+ | skin、fade、lighting origin 等，渲染包围盒不需要 |
+| `propType` | 24 | u16，取值 0..N-1，与名字表一一对应 |
+| `firstLeaf` / `leafCount` | 26 / 28 | u16；早先误把这里当成 solid/flags |
+| `solid` | 30 | u8：0 = 非实体，1 = BSP，2 = BBox，6 = VPhysics（实测 c1m1 为 6/0/2） |
+| `flags` | 31 | u8，静态道具标志位 |
+| `skin` | 32 | i32 |
+| `fadeMin` / `fadeMax` | 36 / 40 | float，实测 800–1600 |
+| `lightingOrigin` | 44 | Vector（未设置时为 0 或 -1 填充） |
+| `forcedFadeScale` | 56 | float，实测 1.0 |
+| `minDX` / `maxDX` | 60 / 62 | u16 |
+| `diffuseModulation` | 64 | color32（RGBA），默认 `ff ff ff ff` |
+| `disableX360` | 68 | u8，其余为对齐填充 |
+
+v10 追加 `flagsEx`（步长 76），v11 追加 `uniformScale`（步长 80）；基础字段偏移不变，
+遇到 v11 时按 `uniformScale` 缩放 hull（L4D2 自己的图都是 v9，缩放为 1）。
 
 c1m1 实测：188 个模型名、3140 个 leaf 索引、1748 个 prop；ssv1：11 个模型名、400 leaf、61 prop。
 
@@ -284,8 +301,9 @@ hull_min @104 = (-24.4, -50.6, -1.9)
 hull_max @116 = ( 23.6,  50.5, 29.6)
 ```
 
-得到包围盒后按 `angles` 旋转即可。个别模型 `hull_min == hull_max`（无碰撞盒）时，
-回退到固定小盒或 `view_bbmin/view_bbmax`。
+得到包围盒后按 `angles` 旋转即可（`AngleMatrix`：模型 X=forward、Y=left、Z=up）。
+个别模型 `hull_min == hull_max`（无碰撞盒）时回退到 `view_bbmin/view_bbmax`（@128/@140）；
+两者都退化的模型跳过并计入“缺模型”。
 
 ### 4.3 实现拆分
 
@@ -307,6 +325,41 @@ hull_max @116 = ( 23.6,  50.5, 29.6)
 
 约 350–500 行。完成①后约 0.75–1 天；从零开始约 1–1.5 天。
 
+### 4.5 实现记录（2026-11-15）
+
+代码：`src/props.js`（`prps` 解析、MDL hull、OBB、点查询、渲染层），
+`src/geometry.js` 把 props 作为独立图层输出，`src/addon.js` 的内容对象新增
+`readFile()`（addon 模型优先），CLI 的 `build` / `info` / `check` 与 `serve`
+的 `/api/point` 全部接入；查看器新增「静态道具」图层与读数行。
+
+关键实现：
+
+- **模型查找顺序**：addon（VPK 或散装目录）→ 游戏目录散装文件 → 游戏 VPK
+  （`update` > `dlc3` > `dlc2` > `dlc1` > `base`，每个目录内散装优先）。
+  addon 挂载按需打开，`serve` 从 `index.addons` 的 `entries[].source` 重建。
+- **MDL**：只读前 160 字节取 `hull_min/max`，按模型路径缓存；不需要解出整个 MDL。
+- **图层**：每个 prop 生成 12 个三角形（36 顶点），`props` 层默认关闭；
+  顶点数 = `propCount × 36`，便于和 `prps` 对账。
+- **点查询**：`propsAtPoint()` 把世界点反变换到模型局部坐标，报告模型名、solid
+  类型与到最近面的距离；`check` 与 `/api/point` 都会输出。
+- **缓存**：`.mst` 头版本升到 2；`buildMap` 发现旧版（v1，无 props 层）时自动重建。
+
+验证（本机）：
+
+- `build --all`：57 张官方图全部 `缺模型 0`，1748（c1m1）–4089（c1m3）个 prop/图，
+  总耗时约 7 秒（VPK 打开只发生一次）。
+- `info c1m1_hotel`：188 种模型、1748 个 prop、可解析包围盒 1748；
+  `tools/check_props.js c1m1_hotel -48 5008 1184.2` 显示 `.mst` 的 props 层
+  `62928 顶点 = 1748 个盒子`，医院床 hull `48.03 × 101.02 × 31.51`，
+  与 §4.2 的 `hospital_bed.mdl` 完全一致。
+- addon：Amid The Ruins 5 张图 `缺模型 0`（378 种模型）；ssv1、City of the Dead、
+  Black Mesa、viennacalling2 也基本齐全；Journey to Splash Mountain 与
+  Neo Tokyo 分别缺 937–1538 / 624–988 个 prop，原因是这些 addon 依赖未安装的模型包，
+  属预期行为，构建日志与 `info` 会给出数量。
+- 端到端：headless Edge 打开 `?pair=c1m1_hotel|c1m2_streets&layers=world,props`，
+  c1m1 医院病房的床铺显示为绿色盒子；`?pick=` 落在货架 prop 内时读数面板同时给出
+  `clip 体积` 与 `prop 包围盒: 在 shelvinggrocery01.mdl 内`。
+
 ---
 
 ## 5. 验收标准建议
@@ -326,10 +379,11 @@ hull_max @116 = ( 23.6,  50.5, 29.6)
 
 **③ prop_static**
 
-- 每张图的 prop 数量与 `prps` 的 `propCount` 一致；
-- 医院床等有 hull 的模型显示为正确尺寸的盒子；
-- `props` 图层可开关；
-- （可选）`check` 能报告“落在 prop 包围盒内”。
+- ✅ 每张图的 prop 数量与 `prps` 的 `propCount` 一致（props 层顶点 = `propCount × 36`，
+  由 `tools/check_props.js` 对账）；
+- ✅ 医院床等有 hull 的模型显示为正确尺寸的盒子（48.03 × 101.02 × 31.51）；
+- ✅ `props` 图层可开关（默认关闭，`?layers=` 也可控制）；
+- ✅ `check` / `/api/point` 能报告“落在 prop 包围盒内”，并给出模型名与 solid 类型。
 
 ---
 

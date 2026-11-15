@@ -19,9 +19,10 @@ const LAYER_LABEL = {
   water: '水面',
   clip: 'clip 体积',
   detail: '门/实体',
+  props: '静态道具',
 };
 // 特殊图层的额外透明度（最终 = 地图不透明度 x 此系数）
-const LAYER_OPACITY = { clip: 0.5, water: 0.72, sky: 0.3, nodraw: 0.8 };
+const LAYER_OPACITY = { clip: 0.5, water: 0.72, sky: 0.3, nodraw: 0.8, props: 0.6 };
 
 const view = document.getElementById('view');
 const loadingEl = document.getElementById('loading');
@@ -302,7 +303,7 @@ function allLayerNames() {
     for (const n of m.layers.keys()) if (!names.includes(n)) names.push(n);
   }
   // 固定顺序
-  const order = ['world', 'disp', 'detail', 'clip', 'nodraw', 'water', 'sky'];
+  const order = ['world', 'disp', 'detail', 'props', 'clip', 'nodraw', 'water', 'sky'];
   names.sort((a, b) => {
     const ia = order.indexOf(a), ib = order.indexOf(b);
     return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
@@ -319,8 +320,8 @@ function buildLayerToggles() {
     if (only) {
       state.layerVisible.set(name, only.includes(name));
     } else if (!state.layerVisible.has(name)) {
-      // 默认：nodraw/clip/sky 关闭；clip 需要时手动打开（密集地图会很花）
-      state.layerVisible.set(name, !['nodraw', 'clip', 'sky'].includes(name));
+      // 默认：nodraw/clip/sky/props 关闭；clip 与 props 需要时手动打开（密集地图会很花）
+      state.layerVisible.set(name, !['nodraw', 'clip', 'sky', 'props'].includes(name));
     }
     const label = document.createElement('label');
     label.innerHTML = `<input type="checkbox" ${state.layerVisible.get(name) ? 'checked' : ''}/> ${LAYER_LABEL[name] || name}`;
@@ -820,7 +821,13 @@ async function showReadout(p, layer) {
       line = `<b style="color:#6cf08a">开阔空间</b>`;
       color = 0x6cf08a;
     }
-    readoutEl.innerHTML = `${base}\n<span class="dim">B 落点判定:</span> ${line}`;
+    // prop_static 包围盒（车辆的 MDL hull 常远大于可见模型，仅供参考）
+    const props = Array.isArray(d.props) ? d.props : [];
+    const prop = props.find((h) => h.solid) || props[0];
+    const propLine = prop
+      ? `\n<span class="dim">prop 包围盒:</span> <b style="color:#7ee2a8">在 ${String(prop.model).split('/').pop().replace(/[<>&]/g, '')} 内</b> <span class="dim">${prop.solid ? '' : '非实体，'}距面 ${prop.depth}</span>`
+      : '';
+    readoutEl.innerHTML = `${base}\n<span class="dim">B 落点判定:</span> ${line}${propLine}`;
     if (state.pickMarker) state.pickMarker.material.color.setHex(color);
   } catch {
     // 静态服务器未开 / 地图不在 maps 目录时忽略

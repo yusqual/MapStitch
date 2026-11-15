@@ -39,7 +39,8 @@ export function writeMst(file, extracted) {
     layers.push(entry);
   }
   const header = {
-    version: 1,
+    // v2：增加 props（prop_static 包围盒）层；buildMap 用版本号判断旧缓存是否过期
+    version: 2,
     map: extracted.map,
     bounds: extracted.bounds,
     stats: extracted.stats,

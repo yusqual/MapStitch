@@ -8,8 +8,8 @@
 //   node src/cli.js build --addon <vp/目录>  解包选中 addon 并加入 index（可重复 --addon）
 //   node src/cli.js build c1m1_hotel c1m2_streets [landmark]
 //   node src/cli.js serve [--port 8123]     启动可视化
-//   node src/cli.js check <A> <B> <x> <y> <z>  查一个点传到下一章后落在什么体积里
-//   node src/cli.js info <map>              输出单图 lump/统计信息
+//   node src/cli.js check <A> <B> <x> <y> <z>  查一个点传到下一章后落在什么体积里（含 prop 包围盒）
+//   node src/cli.js info <map>              输出单图 lump / 静态道具 / 统计信息
 //   node src/cli.js addons [filter]         列出 addons/创意工坊 addon（--inspect 看地图数）
 //   node src/cli.js vpk <file> [prefix]     列出 VPK 目录树（验证 preload/分卷）
 //
@@ -39,6 +39,9 @@ import {
 } from './gamepath.js';
 import { openVpk } from './vpk.js';
 import { brushesAtPoint } from './query.js';
+import {
+  ModelProvider, modelProviderFromIndex, parseStaticProps, propBoxes, propsAtPoint,
+} from './props.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -152,7 +155,15 @@ function buildMap(name, opts, srcFile) {
   if (!opts.force && fs.existsSync(dst)) {
     const d = fs.statSync(dst);
     if (d.mtimeMs >= st.mtimeMs) {
-      return { name, file: dst, cached: true, size: d.size };
+      // 旧格式（v1，无 props 层）即使比 bsp 新也要重建一次；有 prop 却一个盒子都没
+      // 画出来（当时没找到模型）同样重建，避免缺游戏目录时生成的缓存永久生效。
+      let header = null;
+      try { header = readMstHeader(dst); } catch { /* 损坏则重建 */ }
+      const hasPropsLayer = header && (header.layers || []).some((l) => l && l.name === 'props');
+      const propsUnresolved = header && header.stats && header.stats.props > 0 && !hasPropsLayer;
+      if (header && header.version >= 2 && !propsUnresolved) {
+        return { name, file: dst, cached: true, size: d.size };
+      }
     }
   }
   const t0 = Date.now();
@@ -161,18 +172,24 @@ function buildMap(name, opts, srcFile) {
     mapName: name,
     tint: opts.tint || TINTS.a,
     tintAmount: opts.tintAmount,
+    models: opts.models,
   });
   extracted.markers = markerSummary(extracted.markers);
   const r = writeMst(dst, extracted);
   const secs = ms(Date.now() - t0);
   const tris = extracted.layers.reduce((s, l) => s + l.vertexCount / 3, 0) | 0;
-  console.log(`  ${name.padEnd(28)} ${String(tris).padStart(8)} 三角形  ${(r.bytes / 1048576).toFixed(1)} MB  ${secs}`);
+  const props = extracted.stats?.props || 0;
+  const propNote = props
+    ? `  ${String(props).padStart(4)} prop（缺模型 ${extracted.stats.propsMissing || 0}）`
+    : '';
+  console.log(`  ${name.padEnd(28)} ${String(tris).padStart(8)} 三角形${propNote}  ${(r.bytes / 1048576).toFixed(1)} MB  ${secs}`);
   return { name, file: dst, cached: false, size: r.bytes, header: r.header };
 }
 
 // mapFiles: { <mapName>: <bsp 绝对路径> }；mapMeta: { <mapName>: { addon } }
 function buildAll(pairs, opts, { merge = true, mapFiles = {}, mapMeta = {}, extraMaps = [], addonInfo = null } = {}) {
   const names = [...new Set([...extraMaps, ...pairs.flatMap((p) => [p.from, p.to])])];
+  if (!opts.models) opts.models = new ModelProvider({ gameRoot: opts.gameRoot || getGameRoot() });
   console.log(`导出 ${names.length} 张地图 -> ${path.join(opts.out, 'maps')}`);
   const maps = {};
   // A/B 用同一素材色，冷暖 tint 留给查看器做（避免同一张图导出两份）
@@ -286,6 +303,12 @@ function buildAddon(opts) {
     throw new Error(`addon ${analyzed.addons.map((a) => a.name).join(' + ')} 里没有找到任何 .bsp（不是地图 addon？）`);
   }
 
+  // addon 的模型优先于官方：prop_static 常引用 addon 自带的 MDL
+  opts.models = new ModelProvider({
+    gameRoot: opts.gameRoot || getGameRoot(),
+    addons: analyzed.parts.map((p) => p.content),
+  });
+
   const mapFiles = {};
   const mapMeta = {};
   for (const m of materialized.maps) {
@@ -344,7 +367,27 @@ function loadBspCached(name, opts, sources) {
   return bspCache.get(file);
 }
 
-// GET /api/point?map=<map>&x=&y=&z=  返回该点所在的 solid/clip/water brush
+// serve 进程内共享的模型提供器：游戏目录变化或新 addon 解析后置空重建
+function ensureModels(opts) {
+  if (!opts.models) {
+    opts.models = new ModelProvider({
+      gameRoot: opts.gameRoot || getGameRoot(),
+      addonSpecs: modelAddonSpecs(opts.out),
+    });
+  }
+  return opts.models;
+}
+
+function modelAddonSpecs(outDir) {
+  const index = readIndexFile(outDir);
+  const specs = [];
+  for (const a of (index && index.addons) || []) {
+    for (const e of a.entries || []) if (e && e.source) specs.push({ kind: e.kind, source: e.source });
+  }
+  return specs;
+}
+
+// GET /api/point?map=<map>&x=&y=&z=  返回该点所在的 solid/clip/water brush 与 prop 包围盒
 function apiPoint(url, opts, sources, res) {
   const q = url.searchParams;
   const map = q.get('map');
@@ -359,8 +402,15 @@ function apiPoint(url, opts, sources, res) {
       kind: h.kind, brush: h.brush, classname: h.classname, targetname: h.targetname,
       depth: Number(h.depth.toFixed(1)),
     }));
+    let props = [];
+    try {
+      props = propsAtPoint(bsp, ensureModels(opts), p).map((h) => ({
+        model: h.model, index: h.index, solid: h.solid, solidType: h.solidType,
+        depth: Number(h.depth.toFixed(1)),
+      }));
+    } catch { /* 模型读不到时只返回 brush 判定 */ }
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-    res.end(JSON.stringify({ map, p, hits }));
+    res.end(JSON.stringify({ map, p, hits, props }));
   } catch (e) {
     res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: e.message }));
   }
@@ -504,6 +554,8 @@ function startBuildJob(args, opts, { kind, specs = [], summarize = null }) {
   });
   child.on('exit', (code) => {
     job.finishedAt = Date.now();
+    // 新解析的 addon 可能带来新模型，下次点位查询时重建模型提供器
+    opts.models = null;
     if (code !== 0) {
       job.status = 'error';
       job.error = job.error || `构建进程退出码 ${code}`;
@@ -623,6 +675,7 @@ async function handleGameDir(req, res, opts) {
       ? opts.mapsDirs
       : (process.env.L4D2_MAPS_DIR ? [process.env.L4D2_MAPS_DIR] : officialMapsDirs(info.root));
     addonScanCache.clear();
+    opts.models = null;
     sendJson(res, 200, {
       game: { ...info, mapsDirs: officialMapsDirs(info.root) },
       index: indexSummary(opts.out),
@@ -789,6 +842,16 @@ function info(name, opts) {
   console.log(`世界范围 ${fmtVec(m.mins)} .. ${fmtVec(m.maxs)}`);
   console.log(`面 ${bsp.count('FACES')}  位移面 ${bsp.count('DISPINFO')}  顶点 ${bsp.count('VERTEXES')}`);
   console.log(`brush ${bsp.count('BRUSHES')}  brushside ${bsp.count('BRUSHSIDES')}  模型 ${bsp.count('MODELS')}`);
+  const props = parseStaticProps(bsp);
+  if (props) {
+    const resolved = propBoxes(bsp, modelProviderFromIndex(readIndexFile(opts.out), {
+      gameRoot: opts.gameRoot || getGameRoot(),
+    }));
+    console.log(`静态道具 ${props.props.length}（${props.names.length} 种模型，prps v${props.version} / ${props.stride} B）`);
+    console.log(`  可解析包围盒 ${resolved.boxes.length}  缺模型 ${resolved.missing}${resolved.missingModels.length ? `（如 ${resolved.missingModels[0]}）` : ''}`);
+  } else {
+    console.log('静态道具 0（没有 prps lump）');
+  }
   const lm = bsp.entities.filter((e) => e.classname === 'info_landmark');
   console.log(`info_landmark (${lm.length}):`);
   for (const e of lm) console.log(`  ${(e.targetname || '?').padEnd(28)} ${e.origin}`);
@@ -803,6 +866,14 @@ function describeBrushes(list) {
   }).join('\n');
 }
 
+function describeProps(list) {
+  if (!list.length) return '  不在任何 prop_static 包围盒内';
+  return list.slice(0, 4).map((h) => {
+    const name = String(h.model).split('/').pop();
+    return `  [prop ] ${name}${h.solid ? '' : '（非实体）'}，距最近面 ${h.depth.toFixed(1)}`;
+  }).join('\n');
+}
+
 function checkPoint(rest, opts) {
   const [fromName, toName, x, y, z] = rest;
   if (!toName || [x, y, z].some((v) => v === undefined || Number.isNaN(Number(v)))) {
@@ -811,17 +882,22 @@ function checkPoint(rest, opts) {
   const pA = [Number(x), Number(y), Number(z)];
   const bspA = loadBsp(resolveMapWithIndex(fromName, opts));
   const bspB = loadBsp(resolveMapWithIndex(toName, opts));
+  const provider = modelProviderFromIndex(readIndexFile(opts.out), {
+    gameRoot: opts.gameRoot || getGameRoot(),
+  });
   const r = calcOffset(bspA.entities, bspB.entities, null, opts.yaw);
   const pB = aToB(pA, r);
 
   console.log(`landmark ${r.landmark}  偏移 (B - A) = ${fmtVec(r.offset)}${r.yaw ? `  旋转 ${r.yaw}°` : ''}`);
   console.log(`\nA 点 ${fmtVec(pA)}:`);
   console.log(describeBrushes(brushesAtPoint(bspA, pA)));
+  console.log(describeProps(propsAtPoint(bspA, provider, pA)));
   console.log(r.yaw
     ? `\nB 点 = lmB + Rz(-${r.yaw}°) * (A - lmA) = ${fmtVec(pB)}:`
     : `\nB 点 = A + 偏移 = ${fmtVec(pB)}:`);
   const hits = brushesAtPoint(bspB, pB);
   console.log(describeBrushes(hits));
+  console.log(describeProps(propsAtPoint(bspB, provider, pB)));
   const clip = hits.filter((h) => h.kind === 'clip');
   const solid = hits.filter((h) => h.kind === 'solid');
   if (clip.length) console.log('\n判定: B 点落在 clip 体积内 —— 卡墙传点后大概率被卡住，可用。');

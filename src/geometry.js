@@ -10,6 +10,7 @@
 // 每层都是 non-indexed 三角形（位置 Float32 / 法线 Float32 / 颜色 Uint8）。
 
 import { LUMP, SURF, CONTENTS } from './bsp.js';
+import { buildPropsLayer } from './props.js';
 
 // ---------- 材质配色 ----------
 
@@ -377,6 +378,17 @@ export function extractMap(bsp, opts = {}) {
     clipBrushes++;
   }
 
+  // prop_static 包围盒：需要 ModelProvider 从 VPK/目录里取 MDL hull。
+  // 没提供 provider（例如只想快速看几何）时该层不生成；props 解析失败不影响几何导出。
+  let propsLayer = null;
+  if (opts.models) {
+    try {
+      propsLayer = buildPropsLayer(bsp, opts.models, { tint });
+    } catch (e) {
+      console.warn(`  [warn] prop_static 解析失败: ${e.message}`);
+    }
+  }
+
   // 统计/导出
   const outLayers = [];
   for (const [name, mesh] of layers) {
@@ -389,6 +401,7 @@ export function extractMap(bsp, opts = {}) {
       vertexCount: mesh.vertexCount,
     });
   }
+  if (propsLayer && propsLayer.vertexCount) outLayers.push(propsLayer);
 
   // 实体标记
   const markers = extractMarkers(bsp);
@@ -404,6 +417,7 @@ export function extractMap(bsp, opts = {}) {
       dispVerts,
       models: modelCount,
       clipBrushes,
+      ...(propsLayer ? propsLayer.stats : { props: 0, propModels: 0 }),
     },
   };
 }
