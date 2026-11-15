@@ -23,6 +23,11 @@ const LAYER_LABEL = {
 };
 // 特殊图层的额外透明度（最终 = 地图不透明度 x 此系数）
 const LAYER_OPACITY = { clip: 0.5, water: 0.72, sky: 0.3, nodraw: 0.8, props: 0.6 };
+// 透明图层默认不写深度，three.js 按“包围球中心的投影深度”排序；相机一转这个深度就变，
+// 同一张图的各图层顺序会翻转（表现为 props/clip 时隐时现）。这里给每层固定绘制顺序。
+const LAYER_DRAW_ORDER = {
+  sky: 0, world: 10, disp: 11, detail: 20, nodraw: 30, water: 40, clip: 80, props: 90,
+};
 
 const view = document.getElementById('view');
 const loadingEl = document.getElementById('loading');
@@ -241,6 +246,8 @@ async function setPair(pair) {
     if (yawSelect) yawSelect.value = String(yaw);
     setShift(defaultShift(pair, yaw), true);
     applyTint();
+    applyDrawOrder('A');
+    applyDrawOrder('B');
     buildLayerToggles();
     buildMarkers();
     setOpacity('A', Number(document.getElementById('opacityA').value));
@@ -283,8 +290,17 @@ function setOpacity(which, v) {
     mesh.material.depthWrite = mesh.material.opacity > 0.98;
     mesh.material.transparent = true;
   }
-  // B 半透明时保持它的绘制顺序稳定
-  state[which].group.renderOrder = which === 'B' ? 1 : 0;
+}
+
+// 固定图层绘制顺序：同层内 B 永远画在 A 之后（×2 + side），
+// clip / props 这类诊断层画在两张图的世界几何之后，避免随相机转动闪烁。
+function applyDrawOrder(which) {
+  const m = state[which];
+  if (!m) return;
+  const side = which === 'B' ? 1 : 0;
+  for (const [name, mesh] of m.layers) {
+    mesh.renderOrder = (LAYER_DRAW_ORDER[name] ?? 50) * 2 + side;
+  }
 }
 
 function setWireframe(which, on) {
@@ -351,7 +367,8 @@ function markerDot(color, radius = 28) {
   const g = new THREE.SphereGeometry(radius, 12, 8);
   const m = new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 });
   const mesh = new THREE.Mesh(g, m);
-  mesh.renderOrder = 10;
+  // 必须画在 props（90/91）与 clip（80/81）之后
+  mesh.renderOrder = 200;
   return mesh;
 }
 

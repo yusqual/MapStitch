@@ -198,6 +198,15 @@ DOM 里的 `.marker-label` 因而一直保留并累积。
 验证：用 Edge CDP（`--remote-debugging-port`）连续切换两对章节，读取
 `document.querySelectorAll('.marker-label')`，标签始终只有当前图的两个，未累积。
 
+**已修 Bug：props / clip 图层随相机转动时隐时现（2026-11-15）。**
+原因：所有图层都是透明材质，`depthWrite = false`；three.js 对透明对象按**包围球中心的
+投影深度**排序，而相机位置不变、只转朝向时这个投影深度也会变化，于是同一张图里
+props 层与 world 层的先后顺序会翻转——world 后画就会盖住 props。
+修复：给每层固定 `renderOrder`（sky 0、world 10、disp 11、detail 20、nodraw 30、
+water 40、clip 80、props 90），B 的“后画”改为每层 `×2 + 1` 表达；拾取/出生点标记
+提高到 200，保证永远在最上层。
+验证：同一相机位置朝三个方向截图，props 均稳定可见；标记与读数不受影响。
+
 ### 8.7 位移面接缝回归数据
 
 `node tools/check_disp.js <maps目录>` 对 c1–c5 全部官方图跑一遍（RMS 单位：Source 单位）：
